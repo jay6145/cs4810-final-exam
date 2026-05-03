@@ -75,7 +75,7 @@
   // Animation state
   let sunAngle = 0;
   let isSunAnimating = false;
-  let sunSpeed = 0.005;
+  let sunSpeed = 0.0005;
   const sunRadius = 150;  // Orbit radius of the sun
 
   // ===================== Phong Vertex Shader =====================
@@ -279,7 +279,7 @@
 
     // Sun controls
     const sunFolder = gui.addFolder('Sun');
-    sunFolder.add({ speed: sunSpeed }, 'speed', 0.001, 0.05, 0.001)
+    sunFolder.add({ speed: sunSpeed }, 'speed', 0.0001, 0.01, 0.0001)
       .name('Rotation Speed')
       .onChange(v => sunSpeed = v);
     sunFolder.open();
@@ -392,7 +392,26 @@
     // Compute sun world position on a circular orbit
     const sunX = sunRadius * Math.cos(sunAngle);
     const sunY = sunRadius * Math.sin(sunAngle);
-    
+    // normalize the height
+    const t = Math.max(0, sunY / sunRadius);
+    const skyColor = new THREE.Color();
+
+    if (sunY > 20){
+      // handles daytime color scheme
+      skyColor.lerpColors(new THREE.Color(0xFF6B35), new THREE.Color(0x87CEEB), t);  
+        
+    }
+    else if (sunY > -20){
+      // handles evening to night color scheme
+      const duskT = (sunY + 20) / 40; // Normalize sunY to [0, 1] for dusk transition
+      skyColor.lerpColors(new THREE.Color(0x000022), new THREE.Color(0xFF6B35), duskT);
+    }
+    else{
+      // handles night color scheme
+      skyColor.set(0x000022);
+    }
+    scene.background = skyColor;
+
     const sunZ = 0;
     const sunWorldPos = new THREE.Vector3(sunX, sunY, sunZ);
 
