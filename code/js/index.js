@@ -20,6 +20,7 @@ let sunMesh;
 let moonMesh;
 let stars;
 let lake;
+let rain;
 
 let sunLight;
 let campfireLight;
@@ -29,6 +30,7 @@ let hemisphereLight;
 let lakeAreaLight;
 
 const flameMeshes = [];
+const wetMaterials = [];
 const clock = new THREE.Clock();
 
 // scene settings
@@ -42,6 +44,10 @@ const state = {
     aoRadius: 4.0,
     aoIntensity: 16,
     campfireIntensity: 1.8,
+    weatherEnabled: false,
+    rainIntensity: 0.5,
+    fogStrength: 0.4,
+    wetness: 0.55,
 };
 
 // start the scene
@@ -76,6 +82,7 @@ function init() {
     createForest();
     createCampfire();
     createSkyElements();
+    createRain();
     createLights();
     setupPostProcessing();
     setupGUI();
@@ -90,25 +97,29 @@ function init() {
 
 // make the ground and camp area
 function createTerrain() {
+    const groundMaterial = new THREE.MeshStandardMaterial({
+        color: 0x4c7a3c,
+        roughness: 0.98,
+        metalness: 0.02,
+    });
+    wetMaterials.push({ material: groundMaterial, dryRoughness: 0.98, wetRoughness: 0.42, dryMetalness: 0.02, wetMetalness: 0.25 });
     const ground = new THREE.Mesh(
         new THREE.PlaneGeometry(500, 500),
-        new THREE.MeshStandardMaterial({
-            color: 0x4c7a3c,
-            roughness: 0.98,
-            metalness: 0.02,
-        })
+        groundMaterial
     );
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     scene.add(ground);
 
+    const campPatchMaterial = new THREE.MeshStandardMaterial({
+        color: 0x5b4a35,
+        roughness: 1.0,
+        metalness: 0.0,
+    });
+    wetMaterials.push({ material: campPatchMaterial, dryRoughness: 1.0, wetRoughness: 0.5, dryMetalness: 0.0, wetMetalness: 0.2 });
     const campPatch = new THREE.Mesh(
         new THREE.CircleGeometry(20, 48),
-        new THREE.MeshStandardMaterial({
-            color: 0x5b4a35,
-            roughness: 1.0,
-            metalness: 0.0,
-        })
+        campPatchMaterial
     );
     campPatch.rotation.x = -Math.PI / 2;
     campPatch.position.y = 0.02;
@@ -130,13 +141,15 @@ function createLake() {
     lake.position.set(48, 0.05, -32);
     scene.add(lake);
 
+    const shoreMaterial = new THREE.MeshStandardMaterial({
+        color: 0x6c5a3f,
+        roughness: 0.95,
+        metalness: 0.0,
+    });
+    wetMaterials.push({ material: shoreMaterial, dryRoughness: 0.95, wetRoughness: 0.35, dryMetalness: 0.0, wetMetalness: 0.25 });
     const shoreRing = new THREE.Mesh(
         new THREE.RingGeometry(38, 44, 96),
-        new THREE.MeshStandardMaterial({
-            color: 0x6c5a3f,
-            roughness: 0.95,
-            metalness: 0.0,
-        })
+        shoreMaterial
     );
     shoreRing.rotation.x = -Math.PI / 2;
     shoreRing.position.copy(lake.position);
@@ -154,11 +167,13 @@ function createForest() {
         roughness: 0.95,
         metalness: 0.02,
     });
+    wetMaterials.push({ material: trunkMaterial, dryRoughness: 0.95, wetRoughness: 0.5, dryMetalness: 0.02, wetMetalness: 0.2 });
     const leavesMaterial = new THREE.MeshStandardMaterial({
         color: 0x2b6f2f,
         roughness: 0.9,
         metalness: 0.03,
     });
+    wetMaterials.push({ material: leavesMaterial, dryRoughness: 0.9, wetRoughness: 0.45, dryMetalness: 0.03, wetMetalness: 0.18 });
 
     const treeCount = 85;
     for (let i = 0; i < treeCount; i += 1) {
@@ -249,6 +264,37 @@ function createCampfire() {
         flameMeshes.push(flame);
         fireGroup.add(flame);
     }
+}
+
+// make the rain particles
+function createRain() {
+    const rainCount = 5000;
+    const rainPositions = new Float32Array(rainCount * 3);
+    const rainSpeeds = new Float32Array(rainCount);
+
+    for (let i = 0; i < rainCount; i += 1) {
+        const i3 = i * 3;
+        rainPositions[i3] = (Math.random() - 0.5) * 360;
+        rainPositions[i3 + 1] = Math.random() * 180 + 20;
+        rainPositions[i3 + 2] = (Math.random() - 0.5) * 360;
+        rainSpeeds[i] = 28 + Math.random() * 50;
+    }
+
+    const rainGeometry = new THREE.BufferGeometry();
+    rainGeometry.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+    rainGeometry.setAttribute('aSpeed', new THREE.BufferAttribute(rainSpeeds, 1));
+
+    const rainMaterial = new THREE.PointsMaterial({
+        color: 0xbfd8ff,
+        size: 0.23,
+        transparent: true,
+        opacity: 0.0,
+        depthWrite: false,
+    });
+
+    rain = new THREE.Points(rainGeometry, rainMaterial);
+    rain.visible = false;
+    scene.add(rain);
 }
 
 // make sun moon and stars
@@ -378,6 +424,13 @@ function setupGUI() {
     const fireFolder = gui.addFolder('Campfire');
     fireFolder.add(state, 'campfireIntensity', 0.2, 4.5, 0.05).name('Light Intensity');
     fireFolder.open();
+
+    const weatherFolder = gui.addFolder('Weather');
+    weatherFolder.add(state, 'weatherEnabled').name('Enabled');
+    weatherFolder.add(state, 'rainIntensity', 0, 1, 0.01).name('Rain');
+    weatherFolder.add(state, 'fogStrength', 0, 1, 0.01).name('Fog');
+    weatherFolder.add(state, 'wetness', 0, 1, 0.01).name('Wet Ground');
+    weatherFolder.open();
 }
 
 // connect ui buttons
@@ -451,8 +504,15 @@ function updateDayNightLighting() {
     const duskSky = new THREE.Color(0xff7f4d);
     const nightSky = new THREE.Color(0x070b1d);
     const skyColor = new THREE.Color().lerpColors(nightSky, duskSky, twilight).lerp(daySky, daylight);
+    if (state.weatherEnabled) {
+        skyColor.lerp(new THREE.Color(0x7a8698), 0.35 + state.fogStrength * 0.25);
+    }
     scene.background = skyColor;
     scene.fog.color.copy(skyColor);
+
+    const fogBoost = state.weatherEnabled ? state.fogStrength : 0;
+    scene.fog.near = 90 - fogBoost * 35;
+    scene.fog.far = 390 - fogBoost * 230;
 
     ambientLight.intensity = THREE.MathUtils.lerp(0.08, 0.34, daylight);
     hemisphereLight.intensity = THREE.MathUtils.lerp(0.12, 0.52, daylight);
@@ -480,6 +540,36 @@ function animateCampfire(elapsedTime, daylight) {
     campfireSpotLight.intensity = fireIntensity * 0.7;
 }
 
+// animate rain and wet surfaces
+function animateWeather(delta) {
+    if (!rain) {
+        return;
+    }
+
+    const rainAmount = state.weatherEnabled ? state.rainIntensity : 0;
+    rain.visible = rainAmount > 0.01;
+    rain.material.opacity = rainAmount * 0.8;
+
+    const positions = rain.geometry.attributes.position;
+    const speeds = rain.geometry.attributes.aSpeed;
+    for (let i = 0; i < positions.count; i += 1) {
+        const y = positions.getY(i) - speeds.getX(i) * delta * (0.25 + rainAmount);
+        positions.setY(i, y < 0 ? 170 + Math.random() * 30 : y);
+    }
+    positions.needsUpdate = true;
+
+    const wetLevel = state.weatherEnabled ? state.wetness : 0;
+    wetMaterials.forEach(item => {
+        item.material.roughness = THREE.MathUtils.lerp(item.dryRoughness, item.wetRoughness, wetLevel);
+        item.material.metalness = THREE.MathUtils.lerp(item.dryMetalness, item.wetMetalness, wetLevel);
+    });
+
+    const lakeMix = state.weatherEnabled ? state.wetness * 0.55 : 0;
+    if (lake?.material?.uniforms?.color?.value) {
+        lake.material.uniforms.color.value.lerp(new THREE.Color(0x8ea2bd), lakeMix);
+    }
+}
+
 // run the render loop
 function animate() {
     requestAnimationFrame(animate);
@@ -495,6 +585,7 @@ function animate() {
     const sunHeight = sunMesh.position.y;
     const daylight = THREE.MathUtils.clamp((sunHeight + 8) / 130, 0, 1);
     animateCampfire(elapsed, daylight);
+    animateWeather(delta);
 
     const waterTint = new THREE.Color().lerpColors(
         new THREE.Color(0x3c5f8a),
