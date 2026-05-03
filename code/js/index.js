@@ -180,6 +180,9 @@ function createTerrain() {
         color: 0x5b4a35,
         roughness: 1.0,
         metalness: 0.0,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
     });
     wetMaterials.push({ material: campPatchMaterial, dryRoughness: 1.0, wetRoughness: 0.5, dryMetalness: 0.0, wetMetalness: 0.2 });
     const campPatch = new THREE.Mesh(
@@ -203,13 +206,20 @@ function createLake() {
         multisample: 4,
     });
     lake.rotation.x = -Math.PI / 2;
-    lake.position.set(48, 0.05, -32);
+    lake.position.set(48, 0.08, -32);
+    // bias forward so it always wins z-fight with the ground
+    lake.material.polygonOffset = true;
+    lake.material.polygonOffsetFactor = -2;
+    lake.material.polygonOffsetUnits = -2;
     scene.add(lake);
 
     const shoreMaterial = new THREE.MeshStandardMaterial({
         color: 0x6c5a3f,
         roughness: 0.95,
         metalness: 0.0,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
     });
     wetMaterials.push({ material: shoreMaterial, dryRoughness: 0.95, wetRoughness: 0.35, dryMetalness: 0.0, wetMetalness: 0.25 });
     const shoreRing = new THREE.Mesh(
@@ -218,7 +228,7 @@ function createLake() {
     );
     shoreRing.rotation.x = -Math.PI / 2;
     shoreRing.position.copy(lake.position);
-    shoreRing.position.y = 0.03;
+    shoreRing.position.y = 0.05;
     shoreRing.receiveShadow = true;
     scene.add(shoreRing);
 }
@@ -312,10 +322,13 @@ function createCampfire() {
             color: 0x111110,
             roughness: 1.0,
             metalness: 0.0,
+            polygonOffset: true,
+            polygonOffsetFactor: -2,
+            polygonOffsetUnits: -2,
         })
     );
     ashBed.rotation.x = -Math.PI / 2;
-    ashBed.position.y = 0.06;
+    ashBed.position.y = 0.12;
     ashBed.receiveShadow = true;
     fireGroup.add(ashBed);
 
@@ -328,19 +341,27 @@ function createCampfire() {
             emissiveIntensity: 1.6,
             roughness: 1.0,
             metalness: 0.0,
+            polygonOffset: true,
+            polygonOffsetFactor: -3,
+            polygonOffsetUnits: -3,
         })
     );
     emberDisk.rotation.x = -Math.PI / 2;
-    emberDisk.position.y = 0.09;
+    emberDisk.position.y = 0.18;
     fireGroup.add(emberDisk);
 
     // bright inner ember disk
     const innerEmber = new THREE.Mesh(
         new THREE.CircleGeometry(1.05, 24),
-        new THREE.MeshBasicMaterial({ color: 0xffd994 })
+        new THREE.MeshBasicMaterial({
+            color: 0xffd994,
+            polygonOffset: true,
+            polygonOffsetFactor: -4,
+            polygonOffsetUnits: -4,
+        })
     );
     innerEmber.rotation.x = -Math.PI / 2;
-    innerEmber.position.y = 0.11;
+    innerEmber.position.y = 0.24;
     fireGroup.add(innerEmber);
 
     // scattered logs piled at random angles for a natural campfire look
