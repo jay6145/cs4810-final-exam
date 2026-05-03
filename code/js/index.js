@@ -108,17 +108,17 @@ const state = {
     campfireParticles: true,
     sparkAmount: 0.7,
     smokeAmount: 0.65,
-    weatherEnabled: false,
-    rainIntensity: 0.5,
-    fogStrength: 0.4,
-    wetness: 0.55,
+    weatherEnabled: true,
+    rainIntensity: 0,
+    fogStrength: 0.25,
+    wetness: 0,
 };
 
 // start the scene
 function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x89c7ff);
-    scene.fog = new THREE.Fog(0x89c7ff, 130, 430);
+    scene.fog = new THREE.Fog(0x89c7ff, 200, 600);
 
     camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.set(0, 42, 145);
@@ -876,15 +876,20 @@ function updateDayNightLighting() {
     const duskSky = new THREE.Color(0xff7f4d);
     const nightSky = new THREE.Color(0x070b1d);
     const skyColor = new THREE.Color().lerpColors(nightSky, duskSky, twilight).lerp(daySky, daylight);
-    if (state.weatherEnabled) {
-        skyColor.lerp(new THREE.Color(0x7a8698), 0.35 + state.fogStrength * 0.25);
+    if (state.weatherEnabled && state.fogStrength > 0) {
+        skyColor.lerp(new THREE.Color(0x7a8698), state.fogStrength * 0.5);
     }
     scene.background = skyColor;
     scene.fog.color.copy(skyColor);
 
-    const fogBoost = state.weatherEnabled ? state.fogStrength : 0;
-    scene.fog.near = 90 - fogBoost * 35;
-    scene.fog.far = 390 - fogBoost * 230;
+    // fog only when weather is enabled; intensity scales with fogStrength
+    if (state.weatherEnabled) {
+        scene.fog.near = 220 - state.fogStrength * 150;
+        scene.fog.far = 620 - state.fogStrength * 340;
+    } else {
+        scene.fog.near = 10000;
+        scene.fog.far = 10001;
+    }
 
     ambientLight.intensity = THREE.MathUtils.lerp(0.08, 0.34, daylight);
     hemisphereLight.intensity = THREE.MathUtils.lerp(0.12, 0.52, daylight);
