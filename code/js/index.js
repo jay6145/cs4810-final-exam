@@ -313,9 +313,11 @@ function createCampfireParticles() {
         sparkPositions[i3] = (Math.random() - 0.5) * 2.8;
         sparkPositions[i3 + 1] = 2.1 + Math.random() * 1.4;
         sparkPositions[i3 + 2] = (Math.random() - 0.5) * 2.8;
-        sparkVelocities[i3] = (Math.random() - 0.5) * 0.35;
-        sparkVelocities[i3 + 1] = 1.4 + Math.random() * 1.2;
-        sparkVelocities[i3 + 2] = (Math.random() - 0.5) * 0.35;
+        const theta = Math.random() * Math.PI * 2;
+        const speed = 0.6 + Math.random() * 1.2;
+        sparkVelocities[i3] = Math.cos(theta) * speed;
+        sparkVelocities[i3 + 1] = (Math.random() - 0.5) * 1.8 + 0.8;
+        sparkVelocities[i3 + 2] = Math.sin(theta) * speed;
     }
     const sparkGeometry = new THREE.BufferGeometry();
     sparkGeometry.setAttribute('position', new THREE.BufferAttribute(sparkPositions, 3));
@@ -630,17 +632,22 @@ function animateCampfireParticles(delta, daylight) {
         let y = sparkPositions.array[i3 + 1] + sparkVelocities[i3 + 1] * delta;
         let z = sparkPositions.array[i3 + 2] + sparkVelocities[i3 + 2] * delta;
 
-        sparkVelocities[i3] += (Math.random() - 0.5) * 0.006;
-        sparkVelocities[i3 + 2] += (Math.random() - 0.5) * 0.006;
-        sparkVelocities[i3 + 1] *= 0.998;
+        sparkVelocities[i3] += (Math.random() - 0.5) * 0.03;
+        sparkVelocities[i3 + 1] += (Math.random() - 0.5) * 0.02 - 0.01;
+        sparkVelocities[i3 + 2] += (Math.random() - 0.5) * 0.03;
+        sparkVelocities[i3] *= 0.996;
+        sparkVelocities[i3 + 1] *= 0.996;
+        sparkVelocities[i3 + 2] *= 0.996;
 
-        if (y > 14 || Math.abs(x) > 11 || Math.abs(z) > 11) {
+        if (y < 0.6 || y > 15 || Math.hypot(x, z) > 16) {
             x = (Math.random() - 0.5) * 2.8;
             y = 2.0 + Math.random() * 1.2;
             z = (Math.random() - 0.5) * 2.8;
-            sparkVelocities[i3] = (Math.random() - 0.5) * 0.35;
-            sparkVelocities[i3 + 1] = 1.4 + Math.random() * 1.3;
-            sparkVelocities[i3 + 2] = (Math.random() - 0.5) * 0.35;
+            const theta = Math.random() * Math.PI * 2;
+            const speed = 0.6 + Math.random() * 1.2;
+            sparkVelocities[i3] = Math.cos(theta) * speed;
+            sparkVelocities[i3 + 1] = (Math.random() - 0.5) * 1.8 + 0.8;
+            sparkVelocities[i3 + 2] = Math.sin(theta) * speed;
         }
 
         sparkPositions.array[i3] = x;
