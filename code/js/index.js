@@ -343,8 +343,8 @@ function createCampfire() {
     innerEmber.position.y = 0.11;
     fireGroup.add(innerEmber);
 
-    // teepee logs leaning toward center
-    const logGeometry = new THREE.CylinderGeometry(0.32, 0.42, 5.6, 12);
+    // scattered logs piled at random angles for a natural campfire look
+    const logGeometry = new THREE.CylinderGeometry(0.34, 0.4, 5.6, 12);
     const logMaterial = new THREE.MeshStandardMaterial({
         color: 0x4a2a16,
         roughness: 0.95,
@@ -352,18 +352,61 @@ function createCampfire() {
         emissive: 0x401200,
         emissiveIntensity: 0.45,
     });
+
     const logCount = 6;
     for (let i = 0; i < logCount; i += 1) {
-        const angle = (i / logCount) * Math.PI * 2 + 0.25;
-        const baseRadius = 2.4;
+        // each log gets a holder so we can yaw it cleanly around the fire center
+        const holder = new THREE.Group();
+        const yaw = Math.random() * Math.PI * 2;
+        const layer = Math.floor(i / 2);
+        const baseY = 0.42 + layer * 0.5 + (Math.random() - 0.5) * 0.1;
+        const radialOffset = Math.random() * 0.55;
+        const offsetAngle = Math.random() * Math.PI * 2;
+
+        holder.position.set(
+            Math.cos(offsetAngle) * radialOffset,
+            baseY,
+            Math.sin(offsetAngle) * radialOffset
+        );
+        holder.rotation.y = yaw;
+
         const log = new THREE.Mesh(logGeometry, logMaterial);
-        log.position.set(Math.cos(angle) * baseRadius, 1.7, Math.sin(angle) * baseRadius);
-        log.rotation.z = Math.cos(angle) * 0.42;
-        log.rotation.x = -Math.sin(angle) * 0.42;
-        log.rotation.y = angle;
+        log.rotation.z = Math.PI / 2;
+        // slight roll + tilt so logs aren't perfectly aligned
+        log.rotation.x = (Math.random() - 0.5) * 0.18;
+        log.rotation.y = (Math.random() - 0.5) * 0.18;
+        // length variation
+        log.scale.set(0.85 + Math.random() * 0.3, 0.8 + Math.random() * 0.35, 0.85 + Math.random() * 0.3);
         log.castShadow = true;
         log.receiveShadow = true;
-        fireGroup.add(log);
+        holder.add(log);
+        fireGroup.add(holder);
+    }
+
+    // small kindling / branches scattered around the embers
+    const stickGeometry = new THREE.CylinderGeometry(0.1, 0.14, 3.2, 8);
+    const stickCount = 5;
+    for (let i = 0; i < stickCount; i += 1) {
+        const holder = new THREE.Group();
+        const yaw = Math.random() * Math.PI * 2;
+        const radial = Math.random() * 0.9;
+        const offsetAngle = Math.random() * Math.PI * 2;
+
+        holder.position.set(
+            Math.cos(offsetAngle) * radial,
+            0.18 + Math.random() * 0.12,
+            Math.sin(offsetAngle) * radial
+        );
+        holder.rotation.y = yaw;
+
+        const stick = new THREE.Mesh(stickGeometry, logMaterial);
+        stick.rotation.z = Math.PI / 2;
+        stick.rotation.x = (Math.random() - 0.5) * 0.25;
+        stick.scale.y = 0.7 + Math.random() * 0.6;
+        stick.castShadow = true;
+        stick.receiveShadow = true;
+        holder.add(stick);
+        fireGroup.add(holder);
     }
 
     // glowing white-hot core sphere
