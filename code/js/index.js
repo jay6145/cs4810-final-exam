@@ -1,308 +1,529 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { TeapotGeometry } from 'three/addons/geometries/TeapotGeometry.js';
+import { Reflector } from 'three/addons/objects/Reflector.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import GUI from 'lil-gui';
-import { phongVertexShader, phongFragmentShader } from '../shaders/phongShaders.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 
-// ===================== Scene Variables =====================
-let scene, camera, renderer, controls;
-let objects = [];      // Array of { mesh, material, name }
-let sunMesh;           // The visible sun sphere
+// scene variables
+let scene;
+let camera;
+let renderer;
+let controls;
+let composer;
+let ssaoPass;
 let gui;
 
-// Animation state
-let sunAngle = 0;
-let isSunAnimating = false;
-let sunSpeed = 0.0005;
-const sunRadius = 150;  // Orbit radius of the sun
+let sunMesh;
+let moonMesh;
+let stars;
+let lake;
 
-// ===================== Init =====================
+let sunLight;
+let campfireLight;
+let campfireSpotLight;
+let ambientLight;
+let hemisphereLight;
+let lakeAreaLight;
+
+const flameMeshes = [];
+const clock = new THREE.Clock();
+
+// scene settings
+const state = {
+    animateCycle: true,
+    cycleSpeed: 0.02,
+    timeOfDay: 0.35,
+    shadowQuality: 2048,
+    softShadows: true,
+    ambientOcclusion: false,
+    aoRadius: 4.0,
+    aoIntensity: 16,
+    campfireIntensity: 1.8,
+};
+
+// start the scene
 function init() {
-    // Scene
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87CEEB);
+    scene.background = new THREE.Color(0x89c7ff);
+    scene.fog = new THREE.Fog(0x89c7ff, 130, 430);
 
-    // Camera
-    camera = new THREE.PerspectiveCamera(
-        70, window.innerWidth / window.innerHeight, 0.1, 1000
-    );
-    camera.position.set(0, 40, 200);
-    camera.lookAt(0, 0, 0);
+    camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 42, 145);
+    camera.lookAt(0, 20, 0);
 
-    // Renderer
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.body.appendChild(renderer.domElement);
 
-    // Orbit Controls
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    controls.minDistance = 35;
+    controls.maxDistance = 300;
+    controls.maxPolarAngle = Math.PI * 0.48;
 
-    // Axes Helper
-    const axesHelper = new THREE.AxesHelper(20);
-    scene.add(axesHelper);
+    RectAreaLightUniformsLib.init();
 
-
-    // ===================== Create Scene Objects =====================
-    createObjects();
-
-    // ===================== Create Sun =====================
-    createSun();
-
-    // ===================== GUI =====================
+    createTerrain();
+    createLake();
+    createForest();
+    createCampfire();
+    createSkyElements();
+    createLights();
+    setupPostProcessing();
     setupGUI();
-
-    // ===================== Button Wiring =====================
     setupButtons();
+    applyShadowSettings();
+    updateDayNightLighting();
 
-    // ===================== Handle Resize =====================
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+    window.addEventListener('resize', onWindowResize);
 
-    // Start render loop
     animate();
 }
 
-// ===================== Create Shader Material =====================
-function createPhongMaterial(color) {
-    return new THREE.ShaderMaterial({
-        uniforms: {
-            u_objectColor: { value: new THREE.Color(color) },
-            u_lightPos: { value: new THREE.Vector3(40, 30, 0) },
-            u_lightColor: { value: new THREE.Color(1, 1, 1) },
-            u_ambientStrength: { value: 0.15 },
-            u_diffuseStrength: { value: 0.7 },
-            u_specularStrength: { value: 0.5 },
-            u_shininess: { value: 32.0 },
-            u_bandCount: { value: 4.0 },
-        },
-        vertexShader: phongVertexShader,
-        fragmentShader: phongFragmentShader,
+// make the ground and camp area
+function createTerrain() {
+    const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(500, 500),
+        new THREE.MeshStandardMaterial({
+            color: 0x4c7a3c,
+            roughness: 0.98,
+            metalness: 0.02,
+        })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    const campPatch = new THREE.Mesh(
+        new THREE.CircleGeometry(20, 48),
+        new THREE.MeshStandardMaterial({
+            color: 0x5b4a35,
+            roughness: 1.0,
+            metalness: 0.0,
+        })
+    );
+    campPatch.rotation.x = -Math.PI / 2;
+    campPatch.position.y = 0.02;
+    campPatch.receiveShadow = true;
+    scene.add(campPatch);
+}
+
+// make the lake and shoreline
+function createLake() {
+    const lakeGeometry = new THREE.CircleGeometry(38, 96);
+    lake = new Reflector(lakeGeometry, {
+        clipBias: 0.003,
+        textureWidth: window.innerWidth * window.devicePixelRatio,
+        textureHeight: window.innerHeight * window.devicePixelRatio,
+        color: 0x7cc4ff,
+        multisample: 4,
     });
+    lake.rotation.x = -Math.PI / 2;
+    lake.position.set(48, 0.05, -32);
+    scene.add(lake);
+
+    const shoreRing = new THREE.Mesh(
+        new THREE.RingGeometry(38, 44, 96),
+        new THREE.MeshStandardMaterial({
+            color: 0x6c5a3f,
+            roughness: 0.95,
+            metalness: 0.0,
+        })
+    );
+    shoreRing.rotation.x = -Math.PI / 2;
+    shoreRing.position.copy(lake.position);
+    shoreRing.position.y = 0.03;
+    shoreRing.receiveShadow = true;
+    scene.add(shoreRing);
 }
 
-// ===================== Create Objects =====================
-function createObjects() {
+// make trees around the scene
+function createForest() {
+    const trunkGeometry = new THREE.CylinderGeometry(0.8, 1.2, 9, 8);
+    const leavesGeometry = new THREE.ConeGeometry(4.2, 12, 10);
+    const trunkMaterial = new THREE.MeshStandardMaterial({
+        color: 0x5d3a1b,
+        roughness: 0.95,
+        metalness: 0.02,
+    });
+    const leavesMaterial = new THREE.MeshStandardMaterial({
+        color: 0x2b6f2f,
+        roughness: 0.9,
+        metalness: 0.03,
+    });
 
-    // --- Teapot ---
-    const teapotGeo = new TeapotGeometry(7);
-    const teapotMat = createPhongMaterial('#FF6B6B');  // Coral red
-    const teapotMesh = new THREE.Mesh(teapotGeo, teapotMat);
-    teapotMesh.position.set(0, 7, 0);
-    scene.add(teapotMesh);
-    objects.push({ mesh: teapotMesh, material: teapotMat, name: 'Teapot' });
+    const treeCount = 85;
+    for (let i = 0; i < treeCount; i += 1) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = 90 + Math.random() * 125;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
 
-    const groundGeo = new THREE.PlaneGeometry(300, 300);
-    const groundMat = new THREE.MeshBasicMaterial({ color: 0x4a7c59 });
-    const groundMesh = new THREE.Mesh(groundGeo, groundMat);
-    groundMesh.rotation.x = -Math.PI / 2;  // Rotate flat
-    scene.add(groundMesh);
+        // keep center area open for camp/lake stuff
+        if (Math.hypot(x, z) < 55) {
+            continue;
+        }
 
-    // scatter trees around the field
-    createTree(-60, -50);
-    createTree(-80, -20);
-    createTree(-50, -60);
-    createTree(60, -90);
-    createTree(80, -40);
-    createTree(50, -70);
-    createTree(-30, -80);
-    createTree(30, -70);
-    createTree(90, -20);
-    createTree(-90, -10);
+        const scale = 0.85 + Math.random() * 0.7;
+        const tree = new THREE.Group();
+
+        const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+        trunk.position.y = 4.5 * scale;
+        trunk.scale.setScalar(scale);
+        trunk.castShadow = true;
+        trunk.receiveShadow = true;
+        tree.add(trunk);
+
+        const leaves = new THREE.Mesh(leavesGeometry, leavesMaterial);
+        leaves.position.y = 11 * scale;
+        leaves.scale.setScalar(scale);
+        leaves.castShadow = true;
+        leaves.receiveShadow = true;
+        tree.add(leaves);
+
+        tree.position.set(x, 0, z);
+        tree.rotation.y = Math.random() * Math.PI * 2;
+        scene.add(tree);
+    }
 }
 
-// ===================== Create Sun =====================
-function createSun() {
-    // TODO (CP 0): Create a visible sun sphere and add it to the scene.
-    //   Think about which material type makes sense for a glowing light source.
-    const sunGeo = new THREE.SphereGeometry(10, 16, 16);
-    const sunMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-    sunMesh = new THREE.Mesh(sunGeo, sunMat);
-    sunMesh.position.set(sunRadius, 25, 0);
+// make the campfire objects
+function createCampfire() {
+    const fireGroup = new THREE.Group();
+    scene.add(fireGroup);
+
+    const logGeometry = new THREE.CylinderGeometry(0.55, 0.55, 13, 10);
+    const logMaterial = new THREE.MeshStandardMaterial({
+        color: 0x6a4021,
+        roughness: 0.95,
+        metalness: 0.0,
+    });
+
+    for (let i = 0; i < 5; i += 1) {
+        const log = new THREE.Mesh(logGeometry, logMaterial);
+        log.rotation.z = Math.PI / 2.3;
+        log.rotation.y = (i / 5) * Math.PI * 2;
+        log.position.y = 1.0;
+        log.castShadow = true;
+        log.receiveShadow = true;
+        fireGroup.add(log);
+    }
+
+    const emberBed = new THREE.Mesh(
+        new THREE.CircleGeometry(4, 20),
+        new THREE.MeshStandardMaterial({
+            color: 0x2a1d12,
+            emissive: 0x7a2d00,
+            emissiveIntensity: 0.8,
+            roughness: 1.0,
+        })
+    );
+    emberBed.rotation.x = -Math.PI / 2;
+    emberBed.position.y = 0.06;
+    fireGroup.add(emberBed);
+
+    const flameMaterial = new THREE.MeshStandardMaterial({
+        color: 0xff8d2f,
+        emissive: 0xff4d00,
+        emissiveIntensity: 2.2,
+        roughness: 0.25,
+        metalness: 0.0,
+        transparent: true,
+        opacity: 0.9,
+    });
+
+    for (let i = 0; i < 3; i += 1) {
+        const flame = new THREE.Mesh(new THREE.ConeGeometry(1.8 - i * 0.3, 6 + i * 1.2, 16), flameMaterial.clone());
+        flame.position.y = 3.5 + i * 1.15;
+        flame.position.x = (Math.random() - 0.5) * 0.5;
+        flame.position.z = (Math.random() - 0.5) * 0.5;
+        flame.castShadow = false;
+        flameMeshes.push(flame);
+        fireGroup.add(flame);
+    }
+}
+
+// make sun moon and stars
+function createSkyElements() {
+    sunMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(9, 24, 24),
+        new THREE.MeshBasicMaterial({ color: 0xffdf70 })
+    );
     scene.add(sunMesh);
 
+    moonMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(6.5, 24, 24),
+        new THREE.MeshBasicMaterial({ color: 0xdde4ff })
+    );
+    scene.add(moonMesh);
+
+    const starGeometry = new THREE.BufferGeometry();
+    const starCount = 900;
+    const starPositions = new Float32Array(starCount * 3);
+    for (let i = 0; i < starCount; i += 1) {
+        const radius = 320 + Math.random() * 120;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(THREE.MathUtils.randFloatSpread(2));
+        starPositions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+        starPositions[i * 3 + 1] = Math.abs(radius * Math.cos(phi)) + 15;
+        starPositions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta);
+    }
+    starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+
+    stars = new THREE.Points(
+        starGeometry,
+        new THREE.PointsMaterial({
+            color: 0xe5ecff,
+            size: 1.2,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 0.9,
+        })
+    );
+    scene.add(stars);
 }
 
-// ===================== Create Tree ======================
-function createTree(x, z) {
-    const trunkGeo = new THREE.CylinderGeometry(1, 1, 10, 8);
-    const trunkMat = createPhongMaterial('#8B4513');
-    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-    trunk.position.set(x, 5, z);
-    scene.add(trunk);
+// add all light types
+function createLights() {
+    ambientLight = new THREE.AmbientLight(0xffffff, 0.24);
+    scene.add(ambientLight);
 
-    const leavesGeo = new THREE.ConeGeometry(8, 20, 8);
-    const leavesMat = createPhongMaterial('#228B22');
-    const leaves = new THREE.Mesh(leavesGeo, leavesMat);
-    leaves.position.set(x, 15, z);
-    scene.add(leaves);
+    hemisphereLight = new THREE.HemisphereLight(0x9ec8ff, 0x274122, 0.4);
+    scene.add(hemisphereLight);
+
+    sunLight = new THREE.DirectionalLight(0xfff1c2, 1.8);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.set(state.shadowQuality, state.shadowQuality);
+    sunLight.shadow.camera.near = 10;
+    sunLight.shadow.camera.far = 360;
+    sunLight.shadow.camera.left = -140;
+    sunLight.shadow.camera.right = 140;
+    sunLight.shadow.camera.top = 140;
+    sunLight.shadow.camera.bottom = -140;
+    sunLight.shadow.bias = -0.00008;
+    scene.add(sunLight);
+    sunLight.target.position.set(0, 0, 0);
+    scene.add(sunLight.target);
+
+    campfireLight = new THREE.PointLight(0xff8b2f, state.campfireIntensity, 90, 2.0);
+    campfireLight.position.set(0, 4.5, 0);
+    campfireLight.castShadow = true;
+    campfireLight.shadow.mapSize.set(1024, 1024);
+    campfireLight.shadow.bias = -0.0009;
+    scene.add(campfireLight);
+
+    campfireSpotLight = new THREE.SpotLight(0xffb066, 1.3, 70, Math.PI / 4, 0.45, 1.2);
+    campfireSpotLight.position.set(0, 11, 0);
+    campfireSpotLight.target.position.set(0, 0, 0);
+    campfireSpotLight.castShadow = true;
+    campfireSpotLight.shadow.mapSize.set(1024, 1024);
+    scene.add(campfireSpotLight);
+    scene.add(campfireSpotLight.target);
+
+    lakeAreaLight = new THREE.RectAreaLight(0x99c5ff, 2.2, 20, 9);
+    lakeAreaLight.position.set(48, 6, -32);
+    lakeAreaLight.lookAt(48, 0, -32);
+    scene.add(lakeAreaLight);
 }
 
-// ===================== GUI Setup =====================
+// set up post processing
+function setupPostProcessing() {
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+
+    ssaoPass = new SSAOPass(scene, camera, window.innerWidth, window.innerHeight);
+    ssaoPass.kernelRadius = state.aoRadius;
+    ssaoPass.minDistance = 0.004;
+    ssaoPass.maxDistance = 0.16;
+    ssaoPass.output = SSAOPass.OUTPUT.Default;
+    composer.addPass(ssaoPass);
+}
+
+// make the gui controls
 function setupGUI() {
     gui = new GUI({ container: document.getElementById('gui-container') });
 
-    // Sun controls
-    const sunFolder = gui.addFolder('Sun');
-    sunFolder.add({ speed: sunSpeed }, 'speed', 0.0001, 0.01, 0.0001)
-        .name('Rotation Speed')
-        .onChange(v => sunSpeed = v);
-    sunFolder.open();
+    const cycleFolder = gui.addFolder('Time of Day');
+    cycleFolder.add(state, 'animateCycle').name('Animate Cycle');
+    cycleFolder.add(state, 'cycleSpeed', 0.002, 0.12, 0.001).name('Cycle Speed');
+    cycleFolder.add(state, 'timeOfDay', 0, 1, 0.001).name('Time').onChange(updateDayNightLighting);
+    cycleFolder.open();
 
-    // --- Phong Parameters (CP 2) ---
-    const phongFolder = gui.addFolder('Phong Parameters');
-    // TODO (CP 2): Add sliders for ambientStrength, diffuseStrength,
-    //   specularStrength, and shininess that update the uniforms
-    //   on ALL materials in the objects array.
-    phongFolder.open();
+    const shadowFolder = gui.addFolder('Shadows');
+    shadowFolder
+        .add(state, 'shadowQuality', { Low: 512, Medium: 1024, High: 2048, Ultra: 4096 })
+        .name('Shadow Map')
+        .onChange(applyShadowSettings);
+    shadowFolder.add(state, 'softShadows').name('Soft Shadows').onChange(applyShadowSettings);
+    shadowFolder.open();
 
-    // adds slider for ambient strength
-    phongFolder.add({ ambient: 0.15 }, 'ambient', 0, 1, 0.01)
-        .name('Ambient')
-        .onChange(v => {
-            objects.forEach(obj => obj.material.uniforms.u_ambientStrength.value = v);
-        });
-    // adds slider diffuse strength
-    phongFolder.add({ diffuse: 0.7 }, 'diffuse', 0, 2, 0.01)
-        .name('Diffuse')
-        .onChange(v => {
-            objects.forEach(obj => obj.material.uniforms.u_diffuseStrength.value = v);
-        });
-    // adds specular strength slider
-    phongFolder.add({ specular: 0.5 }, 'specular', 0, 2, 0.01)
-        .name('Specular')
-        .onChange(v => {
-            objects.forEach(obj => obj.material.uniforms.u_specularStrength.value = v);
-        });
-    // adds shininess slider
-    phongFolder.add({ shininess: 32.0 }, 'shininess', 2, 256, 1)
-        .name('Shininess')
-        .onChange(v => {
-            objects.forEach(obj => obj.material.uniforms.u_shininess.value = v);
-        });
-
-    // --- Per-Object Controls ---
-    const objFolder = gui.addFolder('Objects');
-    objects.forEach(obj => {
-        const f = objFolder.addFolder(obj.name);
-        f.add(obj.mesh, 'visible').name('Visible');
-        // TODO (CP 2): Add a color picker for obj.material.uniforms.u_objectColor
-        const colorParams = {
-            color: '#' + obj.material.uniforms.u_objectColor.value.getHexString()
-        };
-        // adds color picker for object color
-        f.addColor(colorParams, 'color')
-            .name('Object Color')
-            .onChange(v => {
-                obj.material.uniforms.u_objectColor.value.set(v);
-            });
-        f.open();
+    const aoFolder = gui.addFolder('Ambient Occlusion');
+    aoFolder.add(state, 'ambientOcclusion').name('Enabled');
+    aoFolder.add(state, 'aoRadius', 1, 16, 0.1).name('Radius').onChange(() => {
+        ssaoPass.kernelRadius = state.aoRadius;
     });
-    objFolder.open();
+    aoFolder.add(state, 'aoIntensity', 1, 32, 0.1).name('Intensity').onChange(() => {
+        ssaoPass.kernelRadius = state.aoRadius;
+    });
+    aoFolder.open();
 
-    // --- Toon Shader (CP 3) ---
-    const toonFolder = gui.addFolder('Toon Shader (Global)');
-    // TODO (CP 3): Add a band count slider that updates u_bandCount
-    //   on all toon-shaded materials (same pattern as Phong globals above).
-    toonFolder.add({ bandCount: 4.0 }, 'bandCount', 1, 10, 1)
-        .name('Bands')
-        .onChange(v => {
-            objects.forEach(obj => obj.material.uniforms.u_bandCount.value = v);
-        });
-    toonFolder.open();
-
-    // --- Creative Extensions (CP 4) ---
-    const creativeFolder = gui.addFolder('Creative Extensions');
-    // TODO (CP 4): Add controls for Fresnel, edge detection, iridescent, etc.
-    creativeFolder.open();
-
-    // --- Scene ---
-    const sceneFolder = gui.addFolder('Scene');
-    sceneFolder.add({
-        hideAll() {
-            objects.forEach(o => o.mesh.visible = false);
-            gui.controllersRecursive().forEach(c => c.updateDisplay());
-        }
-    }, 'hideAll').name('Hide All Objects');
-    sceneFolder.add({
-        showAll() {
-            objects.forEach(o => o.mesh.visible = true);
-            gui.controllersRecursive().forEach(c => c.updateDisplay());
-        }
-    }, 'showAll').name('Show All Objects');
-    sceneFolder.open();
+    const fireFolder = gui.addFolder('Campfire');
+    fireFolder.add(state, 'campfireIntensity', 0.2, 4.5, 0.05).name('Light Intensity');
+    fireFolder.open();
 }
 
-// ===================== Button Wiring =====================
+// connect ui buttons
 function setupButtons() {
     const btnSun = document.getElementById('btnToggleSun');
+    btnSun.textContent = 'Pause Cycle';
+    btnSun.classList.add('active');
+
     btnSun.addEventListener('click', () => {
-        isSunAnimating = !isSunAnimating;
-        btnSun.textContent = isSunAnimating ? 'Stop Sun' : 'Start Sun';
-        btnSun.classList.toggle('active', isSunAnimating);
+        state.animateCycle = !state.animateCycle;
+        btnSun.textContent = state.animateCycle ? 'Pause Cycle' : 'Resume Cycle';
+        btnSun.classList.toggle('active', state.animateCycle);
     });
 
     document.getElementById('btnReset').addEventListener('click', () => {
-        isSunAnimating = false;
-        sunAngle = 0;
-        btnSun.textContent = 'Start Sun';
-        btnSun.classList.remove('active');
+        state.animateCycle = true;
+        state.timeOfDay = 0.35;
+        updateDayNightLighting();
+        btnSun.textContent = 'Pause Cycle';
+        btnSun.classList.add('active');
     });
 }
 
-// ===================== Animation Loop =====================
+// update shadow settings
+function applyShadowSettings() {
+    renderer.shadowMap.type = state.softShadows ? THREE.PCFSoftShadowMap : THREE.BasicShadowMap;
+    const size = Number(state.shadowQuality);
+    sunLight.shadow.mapSize.set(size, size);
+    if (sunLight.shadow.map) {
+        sunLight.shadow.map.dispose();
+        sunLight.shadow.map = null;
+    }
+}
+
+// handle screen resize
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    if (composer) {
+        composer.setSize(window.innerWidth, window.innerHeight);
+    }
+    if (ssaoPass) {
+        ssaoPass.setSize(window.innerWidth, window.innerHeight);
+    }
+}
+
+// update day and night lighting
+function updateDayNightLighting() {
+    const sunOrbit = state.timeOfDay * Math.PI * 2 - Math.PI / 2;
+    const sunPosition = new THREE.Vector3(
+        Math.cos(sunOrbit) * 175,
+        Math.sin(sunOrbit) * 130,
+        -35
+    );
+    sunMesh.position.copy(sunPosition);
+    sunLight.position.copy(sunPosition);
+
+    const moonPosition = new THREE.Vector3(
+        Math.cos(sunOrbit + Math.PI) * 175,
+        Math.sin(sunOrbit + Math.PI) * 130,
+        -25
+    );
+    moonMesh.position.copy(moonPosition);
+
+    const daylight = THREE.MathUtils.clamp((sunPosition.y + 8) / 130, 0, 1);
+    const duskFactor = 1 - Math.abs(daylight - 0.45) / 0.45;
+    const twilight = THREE.MathUtils.clamp(duskFactor, 0, 1);
+
+    const daySky = new THREE.Color(0x8fcfff);
+    const duskSky = new THREE.Color(0xff7f4d);
+    const nightSky = new THREE.Color(0x070b1d);
+    const skyColor = new THREE.Color().lerpColors(nightSky, duskSky, twilight).lerp(daySky, daylight);
+    scene.background = skyColor;
+    scene.fog.color.copy(skyColor);
+
+    ambientLight.intensity = THREE.MathUtils.lerp(0.08, 0.34, daylight);
+    hemisphereLight.intensity = THREE.MathUtils.lerp(0.12, 0.52, daylight);
+    sunLight.intensity = THREE.MathUtils.lerp(0.1, 2.3, daylight);
+    lakeAreaLight.intensity = THREE.MathUtils.lerp(2.8, 0.45, daylight);
+
+    stars.visible = daylight < 0.35;
+    stars.material.opacity = THREE.MathUtils.lerp(0.05, 0.95, 1 - daylight);
+    moonMesh.visible = daylight < 0.6;
+    sunMesh.visible = sunPosition.y > -20;
+}
+
+// animate campfire movement and light
+function animateCampfire(elapsedTime, daylight) {
+    flameMeshes.forEach((flame, index) => {
+        const pulse = 0.8 + Math.sin(elapsedTime * (4.2 + index * 1.3) + index) * 0.14;
+        flame.scale.setScalar(pulse);
+        flame.rotation.y += 0.01 + index * 0.002;
+    });
+
+    const flicker = 0.82 + Math.sin(elapsedTime * 24) * 0.15 + Math.sin(elapsedTime * 38) * 0.08;
+    const nightBoost = THREE.MathUtils.lerp(1.25, 0.9, daylight);
+    const fireIntensity = state.campfireIntensity * flicker * nightBoost;
+    campfireLight.intensity = fireIntensity;
+    campfireSpotLight.intensity = fireIntensity * 0.7;
+}
+
+// run the render loop
 function animate() {
     requestAnimationFrame(animate);
+    const delta = clock.getDelta();
+    const elapsed = clock.elapsedTime;
 
-    // --- Sun Animation ---
-    if (isSunAnimating) {
-        sunAngle += sunSpeed;
+    if (state.animateCycle) {
+        state.timeOfDay = (state.timeOfDay + delta * state.cycleSpeed) % 1;
     }
 
-    // Compute sun world position on a circular orbit
-    const sunX = sunRadius * Math.cos(sunAngle);
-    const sunY = sunRadius * Math.sin(sunAngle);
-    // normalize the height
-    const t = Math.max(0, sunY / sunRadius);
-    const skyColor = new THREE.Color();
+    updateDayNightLighting();
 
-    if (sunY > 20) {
-        // handles daytime color scheme
-        skyColor.lerpColors(new THREE.Color(0xFF6B35), new THREE.Color(0x87CEEB), t);
+    const sunHeight = sunMesh.position.y;
+    const daylight = THREE.MathUtils.clamp((sunHeight + 8) / 130, 0, 1);
+    animateCampfire(elapsed, daylight);
 
-    } else if (sunY > -20) {
-        // handles evening to night color scheme
-        const duskT = (sunY + 20) / 40; // Normalize sunY to [0, 1] for dusk transition
-        skyColor.lerpColors(new THREE.Color(0x000022), new THREE.Color(0xFF6B35), duskT);
-    } else {
-        // handles night color scheme
-        skyColor.set(0x000022);
+    const waterTint = new THREE.Color().lerpColors(
+        new THREE.Color(0x3c5f8a),
+        new THREE.Color(0x9fd3ff),
+        daylight
+    );
+    if (lake?.material?.uniforms?.color?.value) {
+        lake.material.uniforms.color.value.copy(waterTint);
     }
-    scene.background = skyColor;
 
-    const sunZ = 0;
-    const sunWorldPos = new THREE.Vector3(sunX, sunY, sunZ);
-
-    // TODO (CP 0): Update sunMesh position to follow the sun orbit.
-    if (sunMesh) {
-        sunMesh.position.copy(sunWorldPos);
+    if (ssaoPass) {
+        ssaoPass.kernelRadius = state.aoRadius;
+        ssaoPass.minDistance = 0.003 + state.aoIntensity * 0.0001;
+        ssaoPass.maxDistance = 0.08 + state.aoIntensity * 0.004;
     }
-    // hides the sun when it goes below the horizon
-    sunMesh.visible = sunY > -2;
-    // TODO (CP 1): Pass the sun's position to the shader as the light position.
-    //   Remember: the shader works in VIEW space, so you need to transform
-    //   the sun's world position into view space before setting the uniform.
-    const sunViewPos = sunWorldPos.clone().applyMatrix4(camera.matrixWorldInverse);
 
-    objects.forEach(obj => {
-        obj.material.uniforms.u_lightPos.value.copy(sunViewPos);
-    });
     controls.update();
-    renderer.render(scene, camera);
+
+    if (state.ambientOcclusion && composer && ssaoPass) {
+        try {
+            composer.render();
+        } catch (error) {
+            console.warn('Post-processing failed, falling back to direct render:', error);
+            state.ambientOcclusion = false;
+            renderer.render(scene, camera);
+        }
+    } else {
+        renderer.render(scene, camera);
+    }
 }
 
 init();
