@@ -21,6 +21,8 @@ let moonMesh;
 let stars;
 let lake;
 let rain;
+let sparkParticles;
+let smokeParticles;
 
 let sunLight;
 let campfireLight;
@@ -44,6 +46,9 @@ const state = {
     aoRadius: 4.0,
     aoIntensity: 16,
     campfireIntensity: 1.8,
+    campfireParticles: true,
+    sparkAmount: 0.7,
+    smokeAmount: 0.65,
     weatherEnabled: false,
     rainIntensity: 0.5,
     fogStrength: 0.4,
@@ -81,6 +86,7 @@ function init() {
     createLake();
     createForest();
     createCampfire();
+    createCampfireParticles();
     createSkyElements();
     createRain();
     createLights();
@@ -297,6 +303,59 @@ function createRain() {
     scene.add(rain);
 }
 
+// make campfire spark and smoke particles
+function createCampfireParticles() {
+    const sparkCount = 220;
+    const sparkPositions = new Float32Array(sparkCount * 3);
+    const sparkVelocities = new Float32Array(sparkCount * 3);
+    for (let i = 0; i < sparkCount; i += 1) {
+        const i3 = i * 3;
+        sparkPositions[i3] = (Math.random() - 0.5) * 1.5;
+        sparkPositions[i3 + 1] = 2.1 + Math.random() * 1.4;
+        sparkPositions[i3 + 2] = (Math.random() - 0.5) * 1.5;
+        sparkVelocities[i3] = (Math.random() - 0.5) * 1.1;
+        sparkVelocities[i3 + 1] = 4.6 + Math.random() * 3.2;
+        sparkVelocities[i3 + 2] = (Math.random() - 0.5) * 1.1;
+    }
+    const sparkGeometry = new THREE.BufferGeometry();
+    sparkGeometry.setAttribute('position', new THREE.BufferAttribute(sparkPositions, 3));
+    const sparkMaterial = new THREE.PointsMaterial({
+        color: 0xffb066,
+        size: 0.35,
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: false,
+    });
+    sparkParticles = new THREE.Points(sparkGeometry, sparkMaterial);
+    sparkParticles.userData.velocities = sparkVelocities;
+    scene.add(sparkParticles);
+
+    const smokeCount = 150;
+    const smokePositions = new Float32Array(smokeCount * 3);
+    const smokeVelocities = new Float32Array(smokeCount * 3);
+    for (let i = 0; i < smokeCount; i += 1) {
+        const i3 = i * 3;
+        smokePositions[i3] = (Math.random() - 0.5) * 1.2;
+        smokePositions[i3 + 1] = 2.4 + Math.random() * 2.0;
+        smokePositions[i3 + 2] = (Math.random() - 0.5) * 1.2;
+        smokeVelocities[i3] = (Math.random() - 0.5) * 0.35;
+        smokeVelocities[i3 + 1] = 1.3 + Math.random() * 1.0;
+        smokeVelocities[i3 + 2] = (Math.random() - 0.5) * 0.35;
+    }
+    const smokeGeometry = new THREE.BufferGeometry();
+    smokeGeometry.setAttribute('position', new THREE.BufferAttribute(smokePositions, 3));
+    const smokeMaterial = new THREE.PointsMaterial({
+        color: 0xc2c7d2,
+        size: 1.25,
+        transparent: true,
+        opacity: 0.45,
+        depthWrite: false,
+    });
+    smokeParticles = new THREE.Points(smokeGeometry, smokeMaterial);
+    smokeParticles.userData.velocities = smokeVelocities;
+    scene.add(smokeParticles);
+}
+
 // make sun moon and stars
 function createSkyElements() {
     sunMesh = new THREE.Mesh(
@@ -423,6 +482,9 @@ function setupGUI() {
 
     const fireFolder = gui.addFolder('Campfire');
     fireFolder.add(state, 'campfireIntensity', 0.2, 4.5, 0.05).name('Light Intensity');
+    fireFolder.add(state, 'campfireParticles').name('Particles');
+    fireFolder.add(state, 'sparkAmount', 0, 1, 0.01).name('Sparks');
+    fireFolder.add(state, 'smokeAmount', 0, 1, 0.01).name('Smoke');
     fireFolder.open();
 
     const weatherFolder = gui.addFolder('Weather');
@@ -540,6 +602,81 @@ function animateCampfire(elapsedTime, daylight) {
     campfireSpotLight.intensity = fireIntensity * 0.7;
 }
 
+// animate campfire particles
+function animateCampfireParticles(delta, daylight) {
+    if (!sparkParticles || !smokeParticles) {
+        return;
+    }
+
+    if (!state.campfireParticles) {
+        sparkParticles.visible = false;
+        smokeParticles.visible = false;
+        return;
+    }
+
+    sparkParticles.visible = true;
+    smokeParticles.visible = true;
+
+    const sparkOpacity = state.sparkAmount * (0.55 + (1 - daylight) * 0.4);
+    const smokeOpacity = state.smokeAmount * 0.45;
+    sparkParticles.material.opacity = sparkOpacity;
+    smokeParticles.material.opacity = smokeOpacity;
+
+    const sparkPositions = sparkParticles.geometry.attributes.position;
+    const sparkVelocities = sparkParticles.userData.velocities;
+    for (let i = 0; i < sparkPositions.count; i += 1) {
+        const i3 = i * 3;
+        let x = sparkPositions.array[i3] + sparkVelocities[i3] * delta;
+        let y = sparkPositions.array[i3 + 1] + sparkVelocities[i3 + 1] * delta;
+        let z = sparkPositions.array[i3 + 2] + sparkVelocities[i3 + 2] * delta;
+
+        sparkVelocities[i3] += (Math.random() - 0.5) * 0.025;
+        sparkVelocities[i3 + 2] += (Math.random() - 0.5) * 0.025;
+        sparkVelocities[i3 + 1] *= 0.995;
+
+        if (y > 16 || Math.abs(x) > 9 || Math.abs(z) > 9) {
+            x = (Math.random() - 0.5) * 1.6;
+            y = 2.0 + Math.random() * 1.2;
+            z = (Math.random() - 0.5) * 1.6;
+            sparkVelocities[i3] = (Math.random() - 0.5) * 1.1;
+            sparkVelocities[i3 + 1] = 4.6 + Math.random() * 3.4;
+            sparkVelocities[i3 + 2] = (Math.random() - 0.5) * 1.1;
+        }
+
+        sparkPositions.array[i3] = x;
+        sparkPositions.array[i3 + 1] = y;
+        sparkPositions.array[i3 + 2] = z;
+    }
+    sparkPositions.needsUpdate = true;
+
+    const smokePositions = smokeParticles.geometry.attributes.position;
+    const smokeVelocities = smokeParticles.userData.velocities;
+    for (let i = 0; i < smokePositions.count; i += 1) {
+        const i3 = i * 3;
+        let x = smokePositions.array[i3] + smokeVelocities[i3] * delta;
+        let y = smokePositions.array[i3 + 1] + smokeVelocities[i3 + 1] * delta;
+        let z = smokePositions.array[i3 + 2] + smokeVelocities[i3 + 2] * delta;
+
+        smokeVelocities[i3] += (Math.random() - 0.5) * 0.003;
+        smokeVelocities[i3 + 2] += (Math.random() - 0.5) * 0.003;
+        smokeVelocities[i3 + 1] *= 0.998;
+
+        if (y > 22 || Math.abs(x) > 14 || Math.abs(z) > 14) {
+            x = (Math.random() - 0.5) * 1.4;
+            y = 2.2 + Math.random() * 1.7;
+            z = (Math.random() - 0.5) * 1.4;
+            smokeVelocities[i3] = (Math.random() - 0.5) * 0.35;
+            smokeVelocities[i3 + 1] = 1.3 + Math.random() * 1.0;
+            smokeVelocities[i3 + 2] = (Math.random() - 0.5) * 0.35;
+        }
+
+        smokePositions.array[i3] = x;
+        smokePositions.array[i3 + 1] = y;
+        smokePositions.array[i3 + 2] = z;
+    }
+    smokePositions.needsUpdate = true;
+}
+
 // animate rain and wet surfaces
 function animateWeather(delta) {
     if (!rain) {
@@ -585,6 +722,7 @@ function animate() {
     const sunHeight = sunMesh.position.y;
     const daylight = THREE.MathUtils.clamp((sunHeight + 8) / 130, 0, 1);
     animateCampfire(elapsed, daylight);
+    animateCampfireParticles(delta, daylight);
     animateWeather(delta);
 
     const waterTint = new THREE.Color().lerpColors(
