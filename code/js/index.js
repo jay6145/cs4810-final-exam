@@ -195,9 +195,29 @@ function createTerrain() {
     scene.add(campPatch);
 }
 
+// generate organic lake outline points using layered sine waves
+function createLakeOutline(segments, baseRadius, variation) {
+    const points = [];
+    for (let i = 0; i < segments; i += 1) {
+        const angle = (i / segments) * Math.PI * 2;
+        const r = baseRadius
+            + Math.sin(angle * 2 + 0.5) * variation
+            + Math.cos(angle * 3 + 1.2) * variation * 0.65
+            + Math.sin(angle * 5 + 2.3) * variation * 0.35;
+        points.push(new THREE.Vector2(Math.cos(angle) * r, Math.sin(angle) * r));
+    }
+    return points;
+}
+
+// fixed lake center used by createLake and createLights
+const LAKE_CENTER = new THREE.Vector3(78, 0.08, -58);
+
 // make the lake and shoreline
 function createLake() {
-    const lakeGeometry = new THREE.CircleGeometry(38, 96);
+    const outlinePoints = createLakeOutline(72, 34, 4.5);
+    const lakeShape = new THREE.Shape(outlinePoints);
+    const lakeGeometry = new THREE.ShapeGeometry(lakeShape, 24);
+
     lake = new Reflector(lakeGeometry, {
         clipBias: 0.003,
         textureWidth: window.innerWidth * window.devicePixelRatio,
@@ -206,12 +226,27 @@ function createLake() {
         multisample: 4,
     });
     lake.rotation.x = -Math.PI / 2;
-    lake.position.set(48, 0.08, -32);
+    lake.position.copy(LAKE_CENTER);
     // bias forward so it always wins z-fight with the ground
     lake.material.polygonOffset = true;
     lake.material.polygonOffsetFactor = -2;
     lake.material.polygonOffsetUnits = -2;
     scene.add(lake);
+
+    // shoreline that hugs the irregular lake outline
+    const shoreWidth = 6;
+    const shoreOuterPoints = outlinePoints.map(p => {
+        const angle = Math.atan2(p.y, p.x);
+        const len = p.length();
+        return new THREE.Vector2(
+            Math.cos(angle) * (len + shoreWidth),
+            Math.sin(angle) * (len + shoreWidth)
+        );
+    });
+    const shoreShape = new THREE.Shape(shoreOuterPoints);
+    // hole points must wind opposite to the outer shape
+    shoreShape.holes.push(new THREE.Path(outlinePoints.slice().reverse()));
+    const shoreGeometry = new THREE.ShapeGeometry(shoreShape, 24);
 
     const shoreMaterial = new THREE.MeshStandardMaterial({
         color: 0x6c5a3f,
@@ -222,12 +257,10 @@ function createLake() {
         polygonOffsetUnits: -1,
     });
     wetMaterials.push({ material: shoreMaterial, dryRoughness: 0.95, wetRoughness: 0.35, dryMetalness: 0.0, wetMetalness: 0.25 });
-    const shoreRing = new THREE.Mesh(
-        new THREE.RingGeometry(38, 44, 96),
-        shoreMaterial
-    );
+
+    const shoreRing = new THREE.Mesh(shoreGeometry, shoreMaterial);
     shoreRing.rotation.x = -Math.PI / 2;
-    shoreRing.position.copy(lake.position);
+    shoreRing.position.copy(LAKE_CENTER);
     shoreRing.position.y = 0.05;
     shoreRing.receiveShadow = true;
     scene.add(shoreRing);
@@ -257,8 +290,10 @@ function createForest() {
         const x = Math.cos(angle) * radius;
         const z = Math.sin(angle) * radius;
 
-        // keep center area open for camp/lake stuff
-        if (Math.hypot(x, z) < 55) {
+        // keep center area open for camp and exclude the lake area
+        const distFromCamp = Math.hypot(x, z);
+        const distFromLake = Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z);
+        if (distFromCamp < 55 || distFromLake < 48) {
             continue;
         }
 
@@ -709,8 +744,8 @@ function createLights() {
     scene.add(campfireSpotLight.target);
 
     lakeAreaLight = new THREE.RectAreaLight(0x99c5ff, 2.2, 20, 9);
-    lakeAreaLight.position.set(48, 6, -32);
-    lakeAreaLight.lookAt(48, 0, -32);
+    lakeAreaLight.position.set(LAKE_CENTER.x, 6, LAKE_CENTER.z);
+    lakeAreaLight.lookAt(LAKE_CENTER.x, 0, LAKE_CENTER.z);
     scene.add(lakeAreaLight);
 }
 
