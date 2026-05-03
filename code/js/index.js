@@ -305,25 +305,25 @@ function createRain() {
 
 // make campfire spark and smoke particles
 function createCampfireParticles() {
-    const sparkCount = 220;
+    const sparkCount = 120;
     const sparkPositions = new Float32Array(sparkCount * 3);
     const sparkVelocities = new Float32Array(sparkCount * 3);
     for (let i = 0; i < sparkCount; i += 1) {
         const i3 = i * 3;
-        sparkPositions[i3] = (Math.random() - 0.5) * 1.5;
+        sparkPositions[i3] = (Math.random() - 0.5) * 2.8;
         sparkPositions[i3 + 1] = 2.1 + Math.random() * 1.4;
-        sparkPositions[i3 + 2] = (Math.random() - 0.5) * 1.5;
-        sparkVelocities[i3] = (Math.random() - 0.5) * 1.1;
-        sparkVelocities[i3 + 1] = 4.6 + Math.random() * 3.2;
-        sparkVelocities[i3 + 2] = (Math.random() - 0.5) * 1.1;
+        sparkPositions[i3 + 2] = (Math.random() - 0.5) * 2.8;
+        sparkVelocities[i3] = (Math.random() - 0.5) * 0.35;
+        sparkVelocities[i3 + 1] = 1.4 + Math.random() * 1.2;
+        sparkVelocities[i3 + 2] = (Math.random() - 0.5) * 0.35;
     }
     const sparkGeometry = new THREE.BufferGeometry();
     sparkGeometry.setAttribute('position', new THREE.BufferAttribute(sparkPositions, 3));
     const sparkMaterial = new THREE.PointsMaterial({
         color: 0xffb066,
-        size: 0.35,
+        size: 0.24,
         transparent: true,
-        opacity: 0.8,
+        opacity: 0.65,
         depthWrite: false,
     });
     sparkParticles = new THREE.Points(sparkGeometry, sparkMaterial);
@@ -338,17 +338,17 @@ function createCampfireParticles() {
         smokePositions[i3] = (Math.random() - 0.5) * 1.2;
         smokePositions[i3 + 1] = 2.4 + Math.random() * 2.0;
         smokePositions[i3 + 2] = (Math.random() - 0.5) * 1.2;
-        smokeVelocities[i3] = (Math.random() - 0.5) * 0.35;
-        smokeVelocities[i3 + 1] = 1.3 + Math.random() * 1.0;
-        smokeVelocities[i3 + 2] = (Math.random() - 0.5) * 0.35;
+        smokeVelocities[i3] = (Math.random() - 0.5) * 0.55;
+        smokeVelocities[i3 + 1] = 2.2 + Math.random() * 1.4;
+        smokeVelocities[i3 + 2] = (Math.random() - 0.5) * 0.55;
     }
     const smokeGeometry = new THREE.BufferGeometry();
     smokeGeometry.setAttribute('position', new THREE.BufferAttribute(smokePositions, 3));
     const smokeMaterial = new THREE.PointsMaterial({
         color: 0xc2c7d2,
-        size: 1.25,
+        size: 1.45,
         transparent: true,
-        opacity: 0.45,
+        opacity: 0.4,
         depthWrite: false,
     });
     smokeParticles = new THREE.Points(smokeGeometry, smokeMaterial);
@@ -617,7 +617,7 @@ function animateCampfireParticles(delta, daylight) {
     sparkParticles.visible = true;
     smokeParticles.visible = true;
 
-    const sparkOpacity = state.sparkAmount * (0.55 + (1 - daylight) * 0.4);
+    const sparkOpacity = state.sparkAmount * (0.4 + (1 - daylight) * 0.3);
     const smokeOpacity = state.smokeAmount * 0.45;
     sparkParticles.material.opacity = sparkOpacity;
     smokeParticles.material.opacity = smokeOpacity;
@@ -630,17 +630,17 @@ function animateCampfireParticles(delta, daylight) {
         let y = sparkPositions.array[i3 + 1] + sparkVelocities[i3 + 1] * delta;
         let z = sparkPositions.array[i3 + 2] + sparkVelocities[i3 + 2] * delta;
 
-        sparkVelocities[i3] += (Math.random() - 0.5) * 0.025;
-        sparkVelocities[i3 + 2] += (Math.random() - 0.5) * 0.025;
-        sparkVelocities[i3 + 1] *= 0.995;
+        sparkVelocities[i3] += (Math.random() - 0.5) * 0.006;
+        sparkVelocities[i3 + 2] += (Math.random() - 0.5) * 0.006;
+        sparkVelocities[i3 + 1] *= 0.998;
 
-        if (y > 16 || Math.abs(x) > 9 || Math.abs(z) > 9) {
-            x = (Math.random() - 0.5) * 1.6;
+        if (y > 14 || Math.abs(x) > 11 || Math.abs(z) > 11) {
+            x = (Math.random() - 0.5) * 2.8;
             y = 2.0 + Math.random() * 1.2;
-            z = (Math.random() - 0.5) * 1.6;
-            sparkVelocities[i3] = (Math.random() - 0.5) * 1.1;
-            sparkVelocities[i3 + 1] = 4.6 + Math.random() * 3.4;
-            sparkVelocities[i3 + 2] = (Math.random() - 0.5) * 1.1;
+            z = (Math.random() - 0.5) * 2.8;
+            sparkVelocities[i3] = (Math.random() - 0.5) * 0.35;
+            sparkVelocities[i3 + 1] = 1.4 + Math.random() * 1.3;
+            sparkVelocities[i3 + 2] = (Math.random() - 0.5) * 0.35;
         }
 
         sparkPositions.array[i3] = x;
@@ -651,23 +651,24 @@ function animateCampfireParticles(delta, daylight) {
 
     const smokePositions = smokeParticles.geometry.attributes.position;
     const smokeVelocities = smokeParticles.userData.velocities;
+    const smokeWind = Math.sin(clock.elapsedTime * 0.3) * 0.006;
     for (let i = 0; i < smokePositions.count; i += 1) {
         const i3 = i * 3;
         let x = smokePositions.array[i3] + smokeVelocities[i3] * delta;
         let y = smokePositions.array[i3 + 1] + smokeVelocities[i3 + 1] * delta;
         let z = smokePositions.array[i3 + 2] + smokeVelocities[i3 + 2] * delta;
 
-        smokeVelocities[i3] += (Math.random() - 0.5) * 0.003;
-        smokeVelocities[i3 + 2] += (Math.random() - 0.5) * 0.003;
-        smokeVelocities[i3 + 1] *= 0.998;
+        smokeVelocities[i3] += (Math.random() - 0.5) * 0.008 + smokeWind;
+        smokeVelocities[i3 + 2] += (Math.random() - 0.5) * 0.008;
+        smokeVelocities[i3 + 1] *= 0.999;
 
-        if (y > 22 || Math.abs(x) > 14 || Math.abs(z) > 14) {
-            x = (Math.random() - 0.5) * 1.4;
+        if (y > 34 || Math.abs(x) > 26 || Math.abs(z) > 26) {
+            x = (Math.random() - 0.5) * 2.2;
             y = 2.2 + Math.random() * 1.7;
-            z = (Math.random() - 0.5) * 1.4;
-            smokeVelocities[i3] = (Math.random() - 0.5) * 0.35;
-            smokeVelocities[i3 + 1] = 1.3 + Math.random() * 1.0;
-            smokeVelocities[i3 + 2] = (Math.random() - 0.5) * 0.35;
+            z = (Math.random() - 0.5) * 2.2;
+            smokeVelocities[i3] = (Math.random() - 0.5) * 0.6;
+            smokeVelocities[i3 + 1] = 2.2 + Math.random() * 1.4;
+            smokeVelocities[i3 + 2] = (Math.random() - 0.5) * 0.6;
         }
 
         smokePositions.array[i3] = x;
