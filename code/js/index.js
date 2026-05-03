@@ -6,6 +6,14 @@ import GUI from 'lil-gui';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
+import {
+    flameVertexShader,
+    flameFragmentShader,
+    sparkVertexShader,
+    sparkFragmentShader,
+    smokeVertexShader,
+    smokeFragmentShader,
+} from '../shaders/campfireShaders.js';
 
 // scene variables
 let scene;
@@ -34,6 +42,57 @@ let lakeAreaLight;
 const flameMeshes = [];
 const wetMaterials = [];
 const clock = new THREE.Clock();
+
+// build a soft glowing dot texture for sparks
+function makeSparkTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gradient.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
+    gradient.addColorStop(0.25, 'rgba(255, 220, 140, 0.95)');
+    gradient.addColorStop(0.55, 'rgba(255, 130, 40, 0.45)');
+    gradient.addColorStop(1.0, 'rgba(255, 80, 0, 0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 64, 64);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+}
+
+// build a soft puff texture for smoke
+function makeSmokeTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+
+    // base puff
+    const baseGradient = ctx.createRadialGradient(64, 64, 6, 64, 64, 60);
+    baseGradient.addColorStop(0.0, 'rgba(255, 255, 255, 0.95)');
+    baseGradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.55)');
+    baseGradient.addColorStop(0.7, 'rgba(255, 255, 255, 0.18)');
+    baseGradient.addColorStop(1.0, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = baseGradient;
+    ctx.fillRect(0, 0, 128, 128);
+
+    // a few extra blobs to break up the silhouette
+    for (let i = 0; i < 6; i += 1) {
+        const px = 40 + Math.random() * 48;
+        const py = 40 + Math.random() * 48;
+        const radius = 18 + Math.random() * 22;
+        const blob = ctx.createRadialGradient(px, py, 0, px, py, radius);
+        blob.addColorStop(0.0, `rgba(255, 255, 255, ${0.18 + Math.random() * 0.18})`);
+        blob.addColorStop(1.0, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = blob;
+        ctx.fillRect(0, 0, 128, 128);
+    }
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+}
 
 // scene settings
 const state = {
@@ -219,57 +278,135 @@ function createForest() {
 // make the campfire objects
 function createCampfire() {
     const fireGroup = new THREE.Group();
+    fireGroup.position.set(0, 0, 0);
     scene.add(fireGroup);
 
-    const logGeometry = new THREE.CylinderGeometry(0.55, 0.55, 13, 10);
-    const logMaterial = new THREE.MeshStandardMaterial({
-        color: 0x6a4021,
-        roughness: 0.95,
+    // stone ring around the pit
+    const stoneGeo = new THREE.SphereGeometry(0.7, 10, 8);
+    const stoneMat = new THREE.MeshStandardMaterial({
+        color: 0x5a5a5a,
+        roughness: 0.92,
         metalness: 0.0,
     });
+    const stoneCount = 10;
+    for (let i = 0; i < stoneCount; i += 1) {
+        const angle = (i / stoneCount) * Math.PI * 2;
+        const radius = 3.6 + Math.random() * 0.4;
+        const stone = new THREE.Mesh(stoneGeo, stoneMat);
+        stone.position.set(Math.cos(angle) * radius, 0.45, Math.sin(angle) * radius);
+        stone.scale.set(
+            0.85 + Math.random() * 0.5,
+            0.65 + Math.random() * 0.35,
+            0.85 + Math.random() * 0.5
+        );
+        stone.rotation.set(Math.random(), Math.random() * Math.PI * 2, Math.random());
+        stone.castShadow = true;
+        stone.receiveShadow = true;
+        fireGroup.add(stone);
+    }
 
-    for (let i = 0; i < 5; i += 1) {
+    // ash bed
+    const ashBed = new THREE.Mesh(
+        new THREE.CircleGeometry(3.4, 32),
+        new THREE.MeshStandardMaterial({
+            color: 0x111110,
+            roughness: 1.0,
+            metalness: 0.0,
+        })
+    );
+    ashBed.rotation.x = -Math.PI / 2;
+    ashBed.position.y = 0.06;
+    ashBed.receiveShadow = true;
+    fireGroup.add(ashBed);
+
+    // hot ember disk
+    const emberDisk = new THREE.Mesh(
+        new THREE.CircleGeometry(2.2, 28),
+        new THREE.MeshStandardMaterial({
+            color: 0x2a1106,
+            emissive: 0xff6320,
+            emissiveIntensity: 1.6,
+            roughness: 1.0,
+            metalness: 0.0,
+        })
+    );
+    emberDisk.rotation.x = -Math.PI / 2;
+    emberDisk.position.y = 0.09;
+    fireGroup.add(emberDisk);
+
+    // bright inner ember disk
+    const innerEmber = new THREE.Mesh(
+        new THREE.CircleGeometry(1.05, 24),
+        new THREE.MeshBasicMaterial({ color: 0xffd994 })
+    );
+    innerEmber.rotation.x = -Math.PI / 2;
+    innerEmber.position.y = 0.11;
+    fireGroup.add(innerEmber);
+
+    // teepee logs leaning toward center
+    const logGeometry = new THREE.CylinderGeometry(0.32, 0.42, 5.6, 12);
+    const logMaterial = new THREE.MeshStandardMaterial({
+        color: 0x4a2a16,
+        roughness: 0.95,
+        metalness: 0.0,
+        emissive: 0x401200,
+        emissiveIntensity: 0.45,
+    });
+    const logCount = 6;
+    for (let i = 0; i < logCount; i += 1) {
+        const angle = (i / logCount) * Math.PI * 2 + 0.25;
+        const baseRadius = 2.4;
         const log = new THREE.Mesh(logGeometry, logMaterial);
-        log.rotation.z = Math.PI / 2.3;
-        log.rotation.y = (i / 5) * Math.PI * 2;
-        log.position.y = 1.0;
+        log.position.set(Math.cos(angle) * baseRadius, 1.7, Math.sin(angle) * baseRadius);
+        log.rotation.z = Math.cos(angle) * 0.42;
+        log.rotation.x = -Math.sin(angle) * 0.42;
+        log.rotation.y = angle;
         log.castShadow = true;
         log.receiveShadow = true;
         fireGroup.add(log);
     }
 
-    const emberBed = new THREE.Mesh(
-        new THREE.CircleGeometry(4, 20),
-        new THREE.MeshStandardMaterial({
-            color: 0x2a1d12,
-            emissive: 0x7a2d00,
-            emissiveIntensity: 0.8,
-            roughness: 1.0,
-        })
+    // glowing white-hot core sphere
+    const core = new THREE.Mesh(
+        new THREE.SphereGeometry(0.55, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0xfff4d2 })
     );
-    emberBed.rotation.x = -Math.PI / 2;
-    emberBed.position.y = 0.06;
-    fireGroup.add(emberBed);
+    core.position.y = 1.2;
+    fireGroup.add(core);
 
-    const flameMaterial = new THREE.MeshStandardMaterial({
-        color: 0xff8d2f,
-        emissive: 0xff4d00,
-        emissiveIntensity: 2.2,
-        roughness: 0.25,
-        metalness: 0.0,
-        transparent: true,
-        opacity: 0.9,
-    });
+    // multi-layered animated flames using custom shader
+    const flameLayers = [
+        { radius: 2.1, height: 5.2, hot: '#ffeec0', mid: '#ff8534', cool: '#3f0700', intensity: 0.95, y: 2.0, seed: 0.0 },
+        { radius: 1.6, height: 5.9, hot: '#fff4cc', mid: '#ffa044', cool: '#651000', intensity: 1.05, y: 2.4, seed: 1.7 },
+        { radius: 1.1, height: 6.4, hot: '#ffffff', mid: '#ffd07a', cool: '#a04400', intensity: 1.25, y: 2.8, seed: 3.4 },
+        { radius: 0.65, height: 5.8, hot: '#ffffff', mid: '#fff0bd', cool: '#ffb060', intensity: 1.55, y: 3.0, seed: 5.1 },
+    ];
 
-    for (let i = 0; i < 3; i += 1) {
-        const flame = new THREE.Mesh(new THREE.ConeGeometry(1.8 - i * 0.3, 6 + i * 1.2, 16), flameMaterial.clone());
-        flame.position.y = 3.5 + i * 1.15;
-        flame.position.x = (Math.random() - 0.5) * 0.5;
-        flame.position.z = (Math.random() - 0.5) * 0.5;
+    flameLayers.forEach(layer => {
+        const material = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime: { value: 0 },
+                uIntensity: { value: layer.intensity },
+                uColorHot: { value: new THREE.Color(layer.hot) },
+                uColorMid: { value: new THREE.Color(layer.mid) },
+                uColorCool: { value: new THREE.Color(layer.cool) },
+                uSeed: { value: layer.seed },
+            },
+            vertexShader: flameVertexShader,
+            fragmentShader: flameFragmentShader,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide,
+        });
+        const geometry = new THREE.ConeGeometry(layer.radius, layer.height, 32, 12, true);
+        const flame = new THREE.Mesh(geometry, material);
+        flame.position.y = layer.y;
         flame.castShadow = false;
+        flame.renderOrder = 2;
         flameMeshes.push(flame);
         fireGroup.add(flame);
-    }
+    });
 }
 
 // make the rain particles
@@ -305,56 +442,128 @@ function createRain() {
 
 // make campfire spark and smoke particles
 function createCampfireParticles() {
-    const sparkCount = 120;
+    const sparkTexture = makeSparkTexture();
+    const smokeTexture = makeSmokeTexture();
+    const pixelRatio = renderer ? renderer.getPixelRatio() : 1;
+
+    // sparks
+    const sparkCount = 260;
     const sparkPositions = new Float32Array(sparkCount * 3);
     const sparkVelocities = new Float32Array(sparkCount * 3);
+    const sparkLifetimes = new Float32Array(sparkCount);
+    const sparkMaxLifetimes = new Float32Array(sparkCount);
+    const sparkSizes = new Float32Array(sparkCount);
+
     for (let i = 0; i < sparkCount; i += 1) {
         const i3 = i * 3;
-        sparkPositions[i3] = (Math.random() - 0.5) * 2.8;
-        sparkPositions[i3 + 1] = 2.1 + Math.random() * 1.4;
-        sparkPositions[i3 + 2] = (Math.random() - 0.5) * 2.8;
+        sparkPositions[i3] = (Math.random() - 0.5) * 0.8;
+        sparkPositions[i3 + 1] = 1.4 + Math.random() * 0.7;
+        sparkPositions[i3 + 2] = (Math.random() - 0.5) * 0.8;
+
         const theta = Math.random() * Math.PI * 2;
-        const speed = 0.6 + Math.random() * 1.2;
-        sparkVelocities[i3] = Math.cos(theta) * speed;
-        sparkVelocities[i3 + 1] = (Math.random() - 0.5) * 1.8 + 0.8;
-        sparkVelocities[i3 + 2] = Math.sin(theta) * speed;
+        const horizontalSpeed = 0.6 + Math.random() * 1.6;
+        const verticalSpeed = 3.5 + Math.random() * 4.8;
+        sparkVelocities[i3] = Math.cos(theta) * horizontalSpeed;
+        sparkVelocities[i3 + 1] = verticalSpeed;
+        sparkVelocities[i3 + 2] = Math.sin(theta) * horizontalSpeed;
+
+        sparkMaxLifetimes[i] = 0.8 + Math.random() * 1.6;
+        // stagger so they aren't all newborn
+        sparkLifetimes[i] = Math.random() * sparkMaxLifetimes[i];
+        sparkSizes[i] = 1.6 + Math.random() * 2.0;
     }
+
     const sparkGeometry = new THREE.BufferGeometry();
     sparkGeometry.setAttribute('position', new THREE.BufferAttribute(sparkPositions, 3));
-    const sparkMaterial = new THREE.PointsMaterial({
-        color: 0xffb066,
-        size: 0.24,
+    sparkGeometry.setAttribute('aLife', new THREE.BufferAttribute(sparkLifetimes, 1));
+    sparkGeometry.setAttribute('aMaxLife', new THREE.BufferAttribute(sparkMaxLifetimes, 1));
+    sparkGeometry.setAttribute('aSize', new THREE.BufferAttribute(sparkSizes, 1));
+
+    const sparkMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+            uTex: { value: sparkTexture },
+            uPixelRatio: { value: pixelRatio },
+            uOpacity: { value: state.sparkAmount },
+        },
+        vertexShader: sparkVertexShader,
+        fragmentShader: sparkFragmentShader,
         transparent: true,
-        opacity: 0.65,
         depthWrite: false,
+        blending: THREE.AdditiveBlending,
     });
+
     sparkParticles = new THREE.Points(sparkGeometry, sparkMaterial);
-    sparkParticles.userData.velocities = sparkVelocities;
+    sparkParticles.frustumCulled = false;
+    sparkParticles.renderOrder = 3;
+    sparkParticles.userData = {
+        velocities: sparkVelocities,
+        lifetimes: sparkLifetimes,
+        maxLifetimes: sparkMaxLifetimes,
+    };
     scene.add(sparkParticles);
 
-    const smokeCount = 150;
+    // smoke
+    const smokeCount = 160;
     const smokePositions = new Float32Array(smokeCount * 3);
     const smokeVelocities = new Float32Array(smokeCount * 3);
+    const smokeLifetimes = new Float32Array(smokeCount);
+    const smokeMaxLifetimes = new Float32Array(smokeCount);
+    const smokeSizes = new Float32Array(smokeCount);
+    const smokeRotations = new Float32Array(smokeCount);
+    const smokeRotationSpeeds = new Float32Array(smokeCount);
+
     for (let i = 0; i < smokeCount; i += 1) {
         const i3 = i * 3;
-        smokePositions[i3] = (Math.random() - 0.5) * 1.2;
-        smokePositions[i3 + 1] = 2.4 + Math.random() * 2.0;
-        smokePositions[i3 + 2] = (Math.random() - 0.5) * 1.2;
-        smokeVelocities[i3] = (Math.random() - 0.5) * 0.55;
-        smokeVelocities[i3 + 1] = 2.2 + Math.random() * 1.4;
-        smokeVelocities[i3 + 2] = (Math.random() - 0.5) * 0.55;
+        smokePositions[i3] = (Math.random() - 0.5) * 1.4;
+        smokePositions[i3 + 1] = 4.0 + Math.random() * 1.6;
+        smokePositions[i3 + 2] = (Math.random() - 0.5) * 1.4;
+
+        const theta = Math.random() * Math.PI * 2;
+        const horizontalSpeed = 0.18 + Math.random() * 0.55;
+        const verticalSpeed = 1.6 + Math.random() * 1.6;
+        smokeVelocities[i3] = Math.cos(theta) * horizontalSpeed;
+        smokeVelocities[i3 + 1] = verticalSpeed;
+        smokeVelocities[i3 + 2] = Math.sin(theta) * horizontalSpeed;
+
+        smokeMaxLifetimes[i] = 5.5 + Math.random() * 5.5;
+        smokeLifetimes[i] = Math.random() * smokeMaxLifetimes[i];
+        smokeSizes[i] = 5.5 + Math.random() * 4.5;
+        smokeRotations[i] = Math.random() * Math.PI * 2;
+        smokeRotationSpeeds[i] = (Math.random() - 0.5) * 0.45;
     }
+
     const smokeGeometry = new THREE.BufferGeometry();
     smokeGeometry.setAttribute('position', new THREE.BufferAttribute(smokePositions, 3));
-    const smokeMaterial = new THREE.PointsMaterial({
-        color: 0xc2c7d2,
-        size: 1.45,
+    smokeGeometry.setAttribute('aLife', new THREE.BufferAttribute(smokeLifetimes, 1));
+    smokeGeometry.setAttribute('aMaxLife', new THREE.BufferAttribute(smokeMaxLifetimes, 1));
+    smokeGeometry.setAttribute('aSize', new THREE.BufferAttribute(smokeSizes, 1));
+    smokeGeometry.setAttribute('aRotation', new THREE.BufferAttribute(smokeRotations, 1));
+
+    const smokeMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+            uTex: { value: smokeTexture },
+            uPixelRatio: { value: pixelRatio },
+            uOpacity: { value: state.smokeAmount },
+            uWarm: { value: new THREE.Color(0x4a3328) },
+            uCool: { value: new THREE.Color(0x6e747e) },
+        },
+        vertexShader: smokeVertexShader,
+        fragmentShader: smokeFragmentShader,
         transparent: true,
-        opacity: 0.4,
         depthWrite: false,
+        blending: THREE.NormalBlending,
     });
+
     smokeParticles = new THREE.Points(smokeGeometry, smokeMaterial);
-    smokeParticles.userData.velocities = smokeVelocities;
+    smokeParticles.frustumCulled = false;
+    smokeParticles.renderOrder = 1;
+    smokeParticles.userData = {
+        velocities: smokeVelocities,
+        lifetimes: smokeLifetimes,
+        maxLifetimes: smokeMaxLifetimes,
+        rotations: smokeRotations,
+        rotationSpeeds: smokeRotationSpeeds,
+    };
     scene.add(smokeParticles);
 }
 
@@ -591,10 +800,11 @@ function updateDayNightLighting() {
 
 // animate campfire movement and light
 function animateCampfire(elapsedTime, daylight) {
-    flameMeshes.forEach((flame, index) => {
-        const pulse = 0.8 + Math.sin(elapsedTime * (4.2 + index * 1.3) + index) * 0.14;
-        flame.scale.setScalar(pulse);
-        flame.rotation.y += 0.01 + index * 0.002;
+    // drive the flame shader animation
+    flameMeshes.forEach(flame => {
+        if (flame.material.uniforms?.uTime) {
+            flame.material.uniforms.uTime.value = elapsedTime;
+        }
     });
 
     const flicker = 0.82 + Math.sin(elapsedTime * 24) * 0.15 + Math.sin(elapsedTime * 38) * 0.08;
@@ -610,79 +820,121 @@ function animateCampfireParticles(delta, daylight) {
         return;
     }
 
-    if (!state.campfireParticles) {
-        sparkParticles.visible = false;
-        smokeParticles.visible = false;
+    const enabled = state.campfireParticles;
+    sparkParticles.visible = enabled;
+    smokeParticles.visible = enabled;
+    if (!enabled) {
         return;
     }
 
-    sparkParticles.visible = true;
-    smokeParticles.visible = true;
+    // sparks pop a bit more at night
+    sparkParticles.material.uniforms.uOpacity.value =
+        state.sparkAmount * (0.6 + (1 - daylight) * 0.4);
+    smokeParticles.material.uniforms.uOpacity.value = state.smokeAmount * 0.95;
 
-    const sparkOpacity = state.sparkAmount * (0.4 + (1 - daylight) * 0.3);
-    const smokeOpacity = state.smokeAmount * 0.45;
-    sparkParticles.material.opacity = sparkOpacity;
-    smokeParticles.material.opacity = smokeOpacity;
-
+    // sparks
     const sparkPositions = sparkParticles.geometry.attributes.position;
-    const sparkVelocities = sparkParticles.userData.velocities;
+    const sparkLifeAttr = sparkParticles.geometry.attributes.aLife;
+    const sparkData = sparkParticles.userData;
     for (let i = 0; i < sparkPositions.count; i += 1) {
         const i3 = i * 3;
-        let x = sparkPositions.array[i3] + sparkVelocities[i3] * delta;
-        let y = sparkPositions.array[i3 + 1] + sparkVelocities[i3 + 1] * delta;
-        let z = sparkPositions.array[i3 + 2] + sparkVelocities[i3 + 2] * delta;
+        let life = sparkData.lifetimes[i] + delta;
+        let vx = sparkData.velocities[i3];
+        let vy = sparkData.velocities[i3 + 1];
+        let vz = sparkData.velocities[i3 + 2];
+        let x = sparkPositions.array[i3];
+        let y = sparkPositions.array[i3 + 1];
+        let z = sparkPositions.array[i3 + 2];
 
-        sparkVelocities[i3] += (Math.random() - 0.5) * 0.03;
-        sparkVelocities[i3 + 1] += (Math.random() - 0.5) * 0.02 - 0.01;
-        sparkVelocities[i3 + 2] += (Math.random() - 0.5) * 0.03;
-        sparkVelocities[i3] *= 0.996;
-        sparkVelocities[i3 + 1] *= 0.996;
-        sparkVelocities[i3 + 2] *= 0.996;
+        // gravity + drag + tiny turbulence
+        vy -= 4.2 * delta;
+        vx *= 0.985;
+        vz *= 0.985;
+        vx += (Math.random() - 0.5) * 0.18;
+        vz += (Math.random() - 0.5) * 0.18;
 
-        if (y < 0.6 || y > 15 || Math.hypot(x, z) > 16) {
-            x = (Math.random() - 0.5) * 2.8;
-            y = 2.0 + Math.random() * 1.2;
-            z = (Math.random() - 0.5) * 2.8;
+        x += vx * delta;
+        y += vy * delta;
+        z += vz * delta;
+
+        if (life > sparkData.maxLifetimes[i] || y < 0.4) {
+            x = (Math.random() - 0.5) * 0.8;
+            y = 1.4 + Math.random() * 0.7;
+            z = (Math.random() - 0.5) * 0.8;
             const theta = Math.random() * Math.PI * 2;
-            const speed = 0.6 + Math.random() * 1.2;
-            sparkVelocities[i3] = Math.cos(theta) * speed;
-            sparkVelocities[i3 + 1] = (Math.random() - 0.5) * 1.8 + 0.8;
-            sparkVelocities[i3 + 2] = Math.sin(theta) * speed;
+            const horizontalSpeed = 0.6 + Math.random() * 1.6;
+            vx = Math.cos(theta) * horizontalSpeed;
+            vy = 3.5 + Math.random() * 4.8;
+            vz = Math.sin(theta) * horizontalSpeed;
+            life = 0;
+            sparkData.maxLifetimes[i] = 0.8 + Math.random() * 1.6;
         }
 
+        sparkData.lifetimes[i] = life;
+        sparkLifeAttr.array[i] = life;
+        sparkData.velocities[i3] = vx;
+        sparkData.velocities[i3 + 1] = vy;
+        sparkData.velocities[i3 + 2] = vz;
         sparkPositions.array[i3] = x;
         sparkPositions.array[i3 + 1] = y;
         sparkPositions.array[i3 + 2] = z;
     }
     sparkPositions.needsUpdate = true;
+    sparkLifeAttr.needsUpdate = true;
 
+    // smoke
     const smokePositions = smokeParticles.geometry.attributes.position;
-    const smokeVelocities = smokeParticles.userData.velocities;
-    const smokeWind = Math.sin(clock.elapsedTime * 0.3) * 0.006;
+    const smokeLifeAttr = smokeParticles.geometry.attributes.aLife;
+    const smokeRotAttr = smokeParticles.geometry.attributes.aRotation;
+    const smokeData = smokeParticles.userData;
+    const wind = clock.elapsedTime;
     for (let i = 0; i < smokePositions.count; i += 1) {
         const i3 = i * 3;
-        let x = smokePositions.array[i3] + smokeVelocities[i3] * delta;
-        let y = smokePositions.array[i3 + 1] + smokeVelocities[i3 + 1] * delta;
-        let z = smokePositions.array[i3 + 2] + smokeVelocities[i3 + 2] * delta;
+        let life = smokeData.lifetimes[i] + delta;
+        let vx = smokeData.velocities[i3];
+        let vy = smokeData.velocities[i3 + 1];
+        let vz = smokeData.velocities[i3 + 2];
+        let x = smokePositions.array[i3];
+        let y = smokePositions.array[i3 + 1];
+        let z = smokePositions.array[i3 + 2];
 
-        smokeVelocities[i3] += (Math.random() - 0.5) * 0.008 + smokeWind;
-        smokeVelocities[i3 + 2] += (Math.random() - 0.5) * 0.008;
-        smokeVelocities[i3 + 1] *= 0.999;
+        // gentle global wind + per-particle jitter
+        vx += (Math.sin(wind * 0.4 + i * 0.13) * 0.05 + (Math.random() - 0.5) * 0.06) * delta;
+        vz += (Math.cos(wind * 0.35 + i * 0.18) * 0.05 + (Math.random() - 0.5) * 0.06) * delta;
+        vy *= 0.999;
 
-        if (y > 34 || Math.abs(x) > 26 || Math.abs(z) > 26) {
-            x = (Math.random() - 0.5) * 2.2;
-            y = 2.2 + Math.random() * 1.7;
-            z = (Math.random() - 0.5) * 2.2;
-            smokeVelocities[i3] = (Math.random() - 0.5) * 0.6;
-            smokeVelocities[i3 + 1] = 2.2 + Math.random() * 1.4;
-            smokeVelocities[i3 + 2] = (Math.random() - 0.5) * 0.6;
+        x += vx * delta;
+        y += vy * delta;
+        z += vz * delta;
+
+        smokeData.rotations[i] += smokeData.rotationSpeeds[i] * delta;
+
+        if (life > smokeData.maxLifetimes[i]) {
+            x = (Math.random() - 0.5) * 1.4;
+            y = 4.0 + Math.random() * 1.6;
+            z = (Math.random() - 0.5) * 1.4;
+            const theta = Math.random() * Math.PI * 2;
+            const horizontalSpeed = 0.18 + Math.random() * 0.55;
+            vx = Math.cos(theta) * horizontalSpeed;
+            vy = 1.6 + Math.random() * 1.6;
+            vz = Math.sin(theta) * horizontalSpeed;
+            life = 0;
+            smokeData.maxLifetimes[i] = 5.5 + Math.random() * 5.5;
         }
 
+        smokeData.lifetimes[i] = life;
+        smokeLifeAttr.array[i] = life;
+        smokeData.velocities[i3] = vx;
+        smokeData.velocities[i3 + 1] = vy;
+        smokeData.velocities[i3 + 2] = vz;
         smokePositions.array[i3] = x;
         smokePositions.array[i3 + 1] = y;
         smokePositions.array[i3 + 2] = z;
+        smokeRotAttr.array[i] = smokeData.rotations[i];
     }
     smokePositions.needsUpdate = true;
+    smokeLifeAttr.needsUpdate = true;
+    smokeRotAttr.needsUpdate = true;
 }
 
 // animate rain and wet surfaces
