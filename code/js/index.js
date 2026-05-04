@@ -18,7 +18,7 @@ import {
     fireflyVertexShader,
     fireflyFragmentShader,
 } from '../shaders/wildlifeShaders.js';
-
+import {Sky} from 'three/addons/objects/Sky.js';
 // scene variables
 let scene;
 let camera;
@@ -44,6 +44,8 @@ let campfireSpotLight;
 let ambientLight;
 let hemisphereLight;
 let lakeAreaLight;
+let sky;
+let skyUniforms;
 
 const flameMeshes = [];
 const wetMaterials = [];
@@ -129,7 +131,7 @@ const state = {
 const LIGHTING_MODES = {
     Realistic: {
         toneMapping: THREE.ACESFilmicToneMapping,
-        exposure: 1.05,
+        exposure: 0.5,
         ambientMult: 1.0,
         hemisphereMult: 1.0,
         sunMult: 1.0,
@@ -137,7 +139,7 @@ const LIGHTING_MODES = {
     },
     Cinematic: {
         toneMapping: THREE.CineonToneMapping,
-        exposure: 0.78,
+        exposure: 0.4,
         ambientMult: 0.55,
         hemisphereMult: 0.65,
         sunMult: 1.4,
@@ -145,7 +147,7 @@ const LIGHTING_MODES = {
     },
     Stylized: {
         toneMapping: THREE.LinearToneMapping,
-        exposure: 1.4,
+        exposure: 0.9,
         ambientMult: 1.5,
         hemisphereMult: 1.4,
         sunMult: 0.95,
@@ -197,7 +199,7 @@ function init() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 0.5;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.body.appendChild(renderer.domElement);
@@ -209,17 +211,19 @@ function init() {
     controls.maxPolarAngle = Math.PI * 0.48;
 
     RectAreaLightUniformsLib.init();
-
+   
     createTerrain();
     createLake();
     createForest();
     createCampfire();
     createCampfireParticles();
     createSkyElements();
+    createSky();
     createRain();
     createFireflies();
     createBirds();
     createLights();
+  
     setupPostProcessing();
     setupGUI();
     setupButtons();
@@ -820,7 +824,17 @@ function createLights() {
     lakeAreaLight.lookAt(LAKE_CENTER.x, 0, LAKE_CENTER.z);
     scene.add(lakeAreaLight);
 }
-
+// uses sky shader to create a dynamic sky based on time of day 
+function createSky(){
+    sky = new Sky();
+    sky.scale.setScalar(1000);
+    scene.add(sky);
+    skyUniforms = sky.material.uniforms;
+    skyUniforms['turbidity'].value = 8;
+    skyUniforms['rayleigh'].value = 2.5;
+    skyUniforms['mieCoefficient'].value = 0.005;
+    skyUniforms['mieDirectionalG'].value = 0.8;
+}
 // build glowing fireflies that drift through the forest at night
 function createFireflies() {
     const count = 130;
@@ -1167,8 +1181,44 @@ function updateDayNightLighting() {
     if (state.weatherEnabled && state.fogStrength > 0) {
         skyColor.lerp(new THREE.Color(0x7a8698), state.fogStrength * 0.5);
     }
-    scene.background = skyColor;
-    scene.fog.color.copy(skyColor);
+    
+    const mode = LIGHTING_MODES[state.lightingMode] || LIGHTING_MODES.Realistic;
+    if (sky && skyUniforms){
+        const sunDir = sunPosition.clone().normalize();
+        skyUniforms['sunPosition'].value.copy(sunDir);
+        const sunElevation = THREE.MathUtils.clamp(sunDir.y, 0, 1);
+        
+        const sunsetBand = THREE.MathUtils.clamp(1-sunElevation / 0.3, 0, 1);
+        const sunsetPow = Math.pow(sunsetBand, 1.4);
+        skyUniforms['rayleigh'].value = THREE.MathUtils.lerp(0.01,0.6, sunsetPow);
+        skyUniforms['turbidity'].value = THREE.MathUtils.lerp(1.5, 22, sunsetPow);
+        skyUniforms['mieCoefficient'].value = THREE.MathUtils.lerp(0.001, 0.06, sunsetPow);
+        skyUniforms['mieDirectionalG'].value = THREE.MathUtils.lerp(0.92, 0.7, sunsetPow);
+        sky.visible = daylight > 0.02;
+        scene.background  = daylight <= 0.02 ? nightSky : null;
+    }
+    else{
+        scene.background = skyColor;
+    }
+    if (daylight > 0.02) {
+        const sunElevation = THREE.MathUtils.clamp(sunPosition.clone().normalize().y, 0, 1);
+        const sunsetBand = THREE.MathUtils.clamp(1 - sunElevation / 0.15, 0, 1);
+        const duskAmbientBoost = sunsetBand * 0.12;
+        ambientLight.intensity = (THREE.MathUtils.lerp(0.08, 0.34, daylight) + duskAmbientBoost) * mode.ambientMult;
+        hemisphereLight.intensity = (THREE.MathUtils.lerp(0.12, 0.52, daylight) + duskAmbientBoost) * mode.hemisphereMult;
+        hemisphereLight.color.setHex(daylight > 0.3 ? 0x9ec8ff : 0xaaaaff);
+        hemisphereLight.groundColor.setHex(sunsetBand > 0.3 ? 0x7a4a2a : 0x274122);
+        const horizonDay = new THREE.Color(0x9dc8e8);
+        const horizonSunset = new THREE.Color(0xc8613a);
+        const horizonNight = new THREE.Color(0x070b1d);
+        const fogColor = new THREE.Color()
+            .lerpColors(horizonDay, horizonSunset, sunsetBand)
+            .lerp(horizonNight, 1 - daylight);
+        scene.fog.color.copy(fogColor);
+    } 
+    else {
+    scene.fog.color.copy(nightSky);
+    }   
 
     // fog only when weather is enabled; intensity scales with fogStrength
     if (state.weatherEnabled) {
@@ -1179,7 +1229,7 @@ function updateDayNightLighting() {
         scene.fog.far = 10001;
     }
 
-    const mode = LIGHTING_MODES[state.lightingMode] || LIGHTING_MODES.Realistic;
+    
     ambientLight.intensity = THREE.MathUtils.lerp(0.08, 0.34, daylight) * mode.ambientMult;
     hemisphereLight.intensity = THREE.MathUtils.lerp(0.12, 0.52, daylight) * mode.hemisphereMult;
     sunLight.intensity = THREE.MathUtils.lerp(0.1, 2.3, daylight) * mode.sunMult;
@@ -1188,7 +1238,7 @@ function updateDayNightLighting() {
     stars.visible = daylight < 0.35;
     stars.material.opacity = THREE.MathUtils.lerp(0.05, 0.95, 1 - daylight);
     moonMesh.visible = daylight < 0.6;
-    sunMesh.visible = sunPosition.y > -20;
+    sunMesh.visible = daylight < 0.08;
 }
 
 // animate campfire movement and light
