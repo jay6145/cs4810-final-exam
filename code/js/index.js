@@ -19,6 +19,10 @@ import {
     fireflyVertexShader,
     fireflyFragmentShader,
 } from '../shaders/wildlifeShaders.js';
+import {
+    auroraVertexShader,
+    auroraFragmentShader,
+} from '../shaders/atmosphereShaders.js';
 
 // scene variables
 let scene;
@@ -54,6 +58,20 @@ const wetMaterials = [];
 const torches = [];
 // scattered hanging lanterns across the map
 const lanterns = [];
+// glowing window squares on the cabin so we can pulse them at night
+const cabinWindows = [];
+// shooting star line segments active right now
+const shootingStars = [];
+// constellation lines drawn between subset of bright stars
+let constellations;
+// aurora curtain mesh
+let aurora;
+// distant mountain backdrop group
+let mountains;
+// canoe group bobbing on the lake
+let canoe;
+// wandering deer group looping through the meadow
+let deer;
 const clock = new THREE.Clock();
 
 // build a soft glowing dot texture for sparks
@@ -112,7 +130,7 @@ const state = {
     animateCycle: true,
     cycleSpeed: 0.02,
     timeOfDay: 0.35,
-    shadowQuality: 2048,
+    shadowQuality: 1024,
     softShadows: true,
     ambientOcclusion: false,
     aoRadius: 4.0,
@@ -131,6 +149,9 @@ const state = {
     tungSahurEnabled: true,
     demoMode: false,
     demoSpeed: 1.0,
+    auroraEnabled: true,
+    constellationsEnabled: true,
+    shootingStarsEnabled: true,
 };
 
 // lighting style presets
@@ -203,7 +224,8 @@ function init() {
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // cap at 1.5 instead of 2 -- huge fragment-shader cost saving on retina screens with very subtle visual loss
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
     renderer.shadowMap.enabled = true;
@@ -219,17 +241,28 @@ function init() {
     RectAreaLightUniformsLib.init();
 
     createTerrain();
+    createMountains();
     createLake();
+    createDock();
+    createCanoe();
     createDirtPaths();
+    createSignpost();
+    createForestFloor();
     createTorches();
     createLanterns();
     createForest();
+    createCabin();
     createCampfire();
+    createCampBenches();
+    createFirewoodPile();
     createCampfireParticles();
     createSkyElements();
+    createConstellations();
+    createAurora();
     createRain();
     createFireflies();
     createBirds();
+    createDeer();
     createTungSahur();
     createLights();
     setupPostProcessing();
@@ -252,8 +285,9 @@ function createTerrain() {
         metalness: 0.02,
     });
     wetMaterials.push({ material: groundMaterial, dryRoughness: 0.98, wetRoughness: 0.42, dryMetalness: 0.02, wetMetalness: 0.25 });
+    // circular ground that reaches past the outermost mountain ring so the meadow blends seamlessly into the horizon
     const ground = new THREE.Mesh(
-        new THREE.PlaneGeometry(500, 500),
+        new THREE.CircleGeometry(420, 96),
         groundMaterial
     );
     ground.rotation.x = -Math.PI / 2;
@@ -311,10 +345,12 @@ function createLake() {
 
     lake = new Reflector(lakeGeometry, {
         clipBias: 0.003,
-        textureWidth: window.innerWidth * window.devicePixelRatio,
-        textureHeight: window.innerHeight * window.devicePixelRatio,
+        // half-resolution reflection cuts the reflector cost roughly in quarter
+        // the slight blur of the reflection is barely noticeable on water
+        textureWidth: Math.floor(window.innerWidth * 0.5),
+        textureHeight: Math.floor(window.innerHeight * 0.5),
         color: 0x7cc4ff,
-        multisample: 4,
+        multisample: 0,
     });
     lake.rotation.x = -Math.PI / 2;
     lake.position.copy(LAKE_CENTER);
@@ -544,7 +580,7 @@ function buildLanternMesh(index) {
 
 // scatter lanterns randomly across the map, avoiding lake and camp
 function createLanterns() {
-    const target = 16;
+    const target = 10;
     let attempts = 0;
     while (lanterns.length < target && attempts < 300) {
         attempts += 1;
@@ -663,8 +699,8 @@ function createDirtPaths() {
         new THREE.Vector3(7, 0, 4),
         new THREE.Vector3(18, 0, -4),
         new THREE.Vector3(28, 0, -16),
-        new THREE.Vector3(38, 0, -28),
-        new THREE.Vector3(46, 0, -36),
+        new THREE.Vector3(34, 0, -24),
+        new THREE.Vector3(40, 0, -31),
     ];
     scene.add(createDirtPath(campToLake, 2.6));
 
@@ -689,6 +725,745 @@ function createDirtPaths() {
     scene.add(createDirtPath(westTrail, 2.2));
 }
 
+// build a far-off mountain silhouette ring for distant depth
+function createMountains() {
+    mountains = new THREE.Group();
+    const ridges = 3;
+    for (let r = 0; r < ridges; r += 1) {
+        const distance = 320 + r * 35;
+        const peakCount = 28 + r * 4;
+        const baseColor = new THREE.Color().setHSL(0.62 - r * 0.02, 0.18 - r * 0.04, 0.18 - r * 0.05);
+        const material = new THREE.MeshStandardMaterial({
+            color: baseColor,
+            roughness: 1.0,
+            metalness: 0.0,
+            flatShading: true,
+            fog: true,
+        });
+        for (let i = 0; i < peakCount; i += 1) {
+            const angle = (i / peakCount) * Math.PI * 2 + (r * 0.07);
+            const x = Math.cos(angle) * distance;
+            const z = Math.sin(angle) * distance;
+            const height = 38 + Math.random() * 60 - r * 4;
+            const radius = 30 + Math.random() * 18;
+            const peak = new THREE.Mesh(
+                new THREE.ConeGeometry(radius, height, 5 + Math.floor(Math.random() * 3)),
+                material,
+            );
+            peak.position.set(x, height / 2 - 3, z);
+            peak.rotation.y = Math.random() * Math.PI * 2;
+            mountains.add(peak);
+        }
+    }
+    scene.add(mountains);
+}
+
+// distant cozy cabin with windows that glow at night
+function createCabin() {
+    const cabin = new THREE.Group();
+    const cabinPos = new THREE.Vector3(-110, 0, -95);
+
+    const wallMaterial = new THREE.MeshStandardMaterial({
+        color: 0x6a4626,
+        roughness: 0.85,
+        metalness: 0.05,
+    });
+    wetMaterials.push({ material: wallMaterial, dryRoughness: 0.85, wetRoughness: 0.45, dryMetalness: 0.05, wetMetalness: 0.2 });
+
+    const roofMaterial = new THREE.MeshStandardMaterial({
+        color: 0x2d2018,
+        roughness: 0.95,
+        metalness: 0.0,
+    });
+    wetMaterials.push({ material: roofMaterial, dryRoughness: 0.95, wetRoughness: 0.5, dryMetalness: 0.0, wetMetalness: 0.2 });
+
+    const body = new THREE.Mesh(
+        new THREE.BoxGeometry(14, 8, 10),
+        wallMaterial,
+    );
+    body.position.y = 4;
+    body.castShadow = true;
+    body.receiveShadow = true;
+    cabin.add(body);
+
+    // a-frame roof using a triangular prism via box rotation
+    const roof = new THREE.Mesh(
+        new THREE.ConeGeometry(10.5, 5, 4, 1),
+        roofMaterial,
+    );
+    roof.rotation.y = Math.PI / 4;
+    roof.scale.set(1.0, 1.0, 1.4);
+    roof.position.y = 11;
+    roof.castShadow = true;
+    roof.receiveShadow = true;
+    cabin.add(roof);
+
+    // chimney
+    const chimney = new THREE.Mesh(
+        new THREE.BoxGeometry(1.6, 4.5, 1.6),
+        new THREE.MeshStandardMaterial({ color: 0x37302b, roughness: 1.0 }),
+    );
+    chimney.position.set(4.5, 12.5, -2);
+    chimney.castShadow = true;
+    cabin.add(chimney);
+
+    // door
+    const door = new THREE.Mesh(
+        new THREE.BoxGeometry(2.0, 3.6, 0.2),
+        new THREE.MeshStandardMaterial({ color: 0x3b2412, roughness: 0.9 }),
+    );
+    door.position.set(0, 1.8, 5.05);
+    cabin.add(door);
+
+    // door frame
+    const doorFrame = new THREE.Mesh(
+        new THREE.BoxGeometry(2.4, 4.0, 0.05),
+        new THREE.MeshStandardMaterial({ color: 0x271810, roughness: 1.0 }),
+    );
+    doorFrame.position.set(0, 2.0, 5.06);
+    cabin.add(doorFrame);
+
+    // glowing windows -- two on the front, one on the side
+    const makeWindow = (x, z, rotY) => {
+        const win = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.6, 1.6),
+            new THREE.MeshStandardMaterial({
+                color: 0xffd07a,
+                emissive: 0xffaa44,
+                emissiveIntensity: 1.5,
+                roughness: 0.4,
+            }),
+        );
+        win.position.set(x, 4.2, z);
+        win.rotation.y = rotY;
+        cabin.add(win);
+        cabinWindows.push(win);
+
+        // tiny point light spilling out from the window
+        const winLight = new THREE.PointLight(0xffd07a, 0, 18, 1.6);
+        winLight.position.set(x + Math.sin(rotY) * 0.4, 4.2, z + Math.cos(rotY) * 0.4);
+        cabin.add(winLight);
+        cabinWindows[cabinWindows.length - 1].userData.light = winLight;
+    };
+    makeWindow(-3.5, 5.06, 0);
+    makeWindow(3.5, 5.06, 0);
+    makeWindow(7.05, 0, Math.PI / 2);
+
+    cabin.position.copy(cabinPos);
+    cabin.rotation.y = 0.5;
+    scene.add(cabin);
+}
+
+// wooden dock that extends from the path into the lake
+function createDock() {
+    const dock = new THREE.Group();
+
+    const plankMat = new THREE.MeshStandardMaterial({
+        color: 0x6a4423,
+        roughness: 0.9,
+        metalness: 0.05,
+    });
+    wetMaterials.push({ material: plankMat, dryRoughness: 0.9, wetRoughness: 0.4, dryMetalness: 0.05, wetMetalness: 0.3 });
+
+    const postMat = new THREE.MeshStandardMaterial({
+        color: 0x3b2918,
+        roughness: 1.0,
+        metalness: 0.0,
+    });
+    wetMaterials.push({ material: postMat, dryRoughness: 1.0, wetRoughness: 0.5, dryMetalness: 0.0, wetMetalness: 0.25 });
+
+    // dock walks from the camp-side shore out into the lake center
+    // start firmly on land (well past the lake shoreline) and reach further into the water
+    const startWorld = new THREE.Vector3(40, 0.2, -31);
+    const endWorld = new THREE.Vector3(74, 0.2, -55);
+    const dir = endWorld.clone().sub(startWorld);
+    const length = dir.length();
+    const yaw = Math.atan2(dir.x, dir.z);
+
+    const deck = new THREE.Mesh(
+        new THREE.BoxGeometry(3.4, 0.3, length),
+        plankMat,
+    );
+    deck.castShadow = true;
+    deck.receiveShadow = true;
+    deck.position.copy(startWorld).add(dir.clone().multiplyScalar(0.5));
+    deck.position.y = 0.6;
+    deck.rotation.y = yaw;
+    dock.add(deck);
+
+    // plank seams every meter to make the deck look like real boards
+    const plankCount = Math.floor(length / 1.1);
+    for (let i = 0; i <= plankCount; i += 1) {
+        const t = i / plankCount;
+        const along = startWorld.clone().lerp(endWorld, t);
+        const seam = new THREE.Mesh(
+            new THREE.BoxGeometry(3.5, 0.05, 0.06),
+            postMat,
+        );
+        seam.position.copy(along);
+        seam.position.y = 0.76;
+        seam.rotation.y = yaw;
+        dock.add(seam);
+    }
+
+    // posts spaced along the dock with a slight tilt
+    const postCount = 4;
+    for (let i = 1; i <= postCount; i += 1) {
+        const t = i / (postCount + 1);
+        const along = startWorld.clone().lerp(endWorld, t);
+        for (const side of [-1.4, 1.4]) {
+            const post = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.2, 0.25, 2.4, 8),
+                postMat,
+            );
+            const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).multiplyScalar(side);
+            post.position.copy(along).add(right);
+            post.position.y = 0.5;
+            post.castShadow = true;
+            post.receiveShadow = true;
+            dock.add(post);
+        }
+    }
+
+    // a small lantern at the far end of the dock
+    const dockLanternHeight = 2.4;
+    const dockLanternPost = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.1, 0.12, dockLanternHeight, 8),
+        postMat,
+    );
+    dockLanternPost.position.copy(endWorld);
+    dockLanternPost.position.y = dockLanternHeight / 2 + 0.3;
+    dockLanternPost.castShadow = true;
+    dock.add(dockLanternPost);
+
+    const dockLanternGlow = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 12, 8),
+        new THREE.MeshStandardMaterial({
+            color: 0xffd07a,
+            emissive: 0xffaa44,
+            emissiveIntensity: 2.0,
+            roughness: 0.4,
+        }),
+    );
+    dockLanternGlow.position.copy(endWorld);
+    dockLanternGlow.position.y = dockLanternHeight + 0.3;
+    dock.add(dockLanternGlow);
+
+    const dockLight = new THREE.PointLight(0xffd07a, 0, 26, 1.6);
+    dockLight.position.copy(endWorld);
+    dockLight.position.y = dockLanternHeight + 0.3;
+    dock.add(dockLight);
+    lanterns.push({
+        x: endWorld.x,
+        z: endWorld.z,
+        light: dockLight,
+        glow: dockLanternGlow,
+        pivot: null,
+        swayPhase: Math.random() * Math.PI,
+        phase: Math.random() * Math.PI * 2,
+        speed: 4 + Math.random() * 5,
+    });
+
+    scene.add(dock);
+}
+
+// canoe near the dock that bobs gently with the water
+function createCanoe() {
+    canoe = new THREE.Group();
+
+    const hullMat = new THREE.MeshStandardMaterial({
+        color: 0x8a4a1f,
+        roughness: 0.55,
+        metalness: 0.1,
+        side: THREE.DoubleSide,
+    });
+    wetMaterials.push({ material: hullMat, dryRoughness: 0.55, wetRoughness: 0.2, dryMetalness: 0.1, wetMetalness: 0.5 });
+
+    const innerMat = new THREE.MeshStandardMaterial({
+        color: 0x5a2f12,
+        roughness: 0.85,
+        metalness: 0.05,
+    });
+
+    const trimMat = new THREE.MeshStandardMaterial({
+        color: 0x2a1a0d,
+        roughness: 0.95,
+        metalness: 0.0,
+    });
+
+    // outer hull is a flattened, elongated half-sphere bowl pointing up
+    const hull = new THREE.Mesh(
+        new THREE.SphereGeometry(2.2, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.5),
+        hullMat,
+    );
+    hull.scale.set(1.0, 0.55, 2.4);
+    hull.rotation.x = Math.PI;
+    hull.position.y = 0.55;
+    hull.castShadow = true;
+    hull.receiveShadow = true;
+    canoe.add(hull);
+
+    // interior floor plank that fills in the bottom of the bowl so it doesn't look hollow
+    const floor = new THREE.Mesh(
+        new THREE.BoxGeometry(1.4, 0.08, 4.4),
+        innerMat,
+    );
+    floor.position.y = 0.18;
+    floor.castShadow = true;
+    floor.receiveShadow = true;
+    canoe.add(floor);
+
+    // top trim ring
+    const trim = new THREE.Mesh(
+        new THREE.TorusGeometry(2.05, 0.07, 6, 24),
+        trimMat,
+    );
+    trim.scale.set(1.0, 2.4, 1.0);
+    trim.rotation.x = Math.PI / 2;
+    trim.position.y = 0.55;
+    canoe.add(trim);
+
+    // crossbar / seat plank near the middle
+    const seat = new THREE.Mesh(
+        new THREE.BoxGeometry(1.6, 0.08, 0.45),
+        trimMat,
+    );
+    seat.position.y = 0.55;
+    canoe.add(seat);
+
+    // a second crossbar near the back for visual structure
+    const seatBack = new THREE.Mesh(
+        new THREE.BoxGeometry(1.45, 0.08, 0.4),
+        trimMat,
+    );
+    seatBack.position.set(0, 0.55, 1.6);
+    canoe.add(seatBack);
+
+    // paddle leaning in
+    const paddleHandle = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.04, 0.04, 2.0, 8),
+        trimMat,
+    );
+    paddleHandle.rotation.z = 0.6;
+    paddleHandle.position.set(0.6, 1.0, 0.4);
+    canoe.add(paddleHandle);
+
+    const paddleBlade = new THREE.Mesh(
+        new THREE.BoxGeometry(0.5, 0.05, 1.0),
+        hullMat,
+    );
+    paddleBlade.rotation.z = 0.6;
+    paddleBlade.position.set(1.4, 0.6, 0.4);
+    canoe.add(paddleBlade);
+
+    // sit clear of the dock and roughly parallel to it, raised so the hull clears the water
+    canoe.position.set(62, 0.85, -39);
+    canoe.rotation.y = 1.0;
+    scene.add(canoe);
+}
+
+// log benches around the campfire
+function createCampBenches() {
+    const logMat = new THREE.MeshStandardMaterial({
+        color: 0x6b4621,
+        roughness: 0.95,
+        metalness: 0.05,
+    });
+    wetMaterials.push({ material: logMat, dryRoughness: 0.95, wetRoughness: 0.5, dryMetalness: 0.05, wetMetalness: 0.2 });
+
+    const benchPositions = [
+        { x: -7.5, z: 1.5, rot: 0.1 },
+        { x: 6.5, z: -3.5, rot: -1.0 },
+        { x: 1.0, z: 7.5, rot: 1.5 },
+    ];
+    benchPositions.forEach(b => {
+        const bench = new THREE.Group();
+        const log = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.55, 0.55, 5.5, 14),
+            logMat,
+        );
+        log.rotation.z = Math.PI / 2;
+        log.position.y = 0.55;
+        log.castShadow = true;
+        log.receiveShadow = true;
+        bench.add(log);
+
+        // two stubby stumps as legs to keep the log from rolling
+        for (const dx of [-1.6, 1.6]) {
+            const leg = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.32, 0.4, 0.7, 8),
+                logMat,
+            );
+            leg.position.set(dx, 0.35, 0);
+            leg.castShadow = true;
+            leg.receiveShadow = true;
+            bench.add(leg);
+        }
+
+        bench.position.set(b.x, 0, b.z);
+        bench.rotation.y = b.rot;
+        scene.add(bench);
+    });
+}
+
+// stacked firewood pile next to the campfire
+function createFirewoodPile() {
+    const woodMat = new THREE.MeshStandardMaterial({
+        color: 0x6a3f1d,
+        roughness: 0.95,
+        metalness: 0.04,
+    });
+    wetMaterials.push({ material: woodMat, dryRoughness: 0.95, wetRoughness: 0.5, dryMetalness: 0.04, wetMetalness: 0.18 });
+    const barkMat = new THREE.MeshStandardMaterial({
+        color: 0x3a2412,
+        roughness: 1.0,
+        metalness: 0.0,
+    });
+
+    const pile = new THREE.Group();
+    const rows = 3;
+    const perRow = 4;
+    const logLen = 2.8;
+    const logRad = 0.32;
+    for (let r = 0; r < rows; r += 1) {
+        const offset = (r % 2) * logRad;
+        for (let i = 0; i < perRow; i += 1) {
+            const log = new THREE.Mesh(
+                new THREE.CylinderGeometry(logRad, logRad, logLen, 12),
+                Math.random() > 0.5 ? woodMat : barkMat,
+            );
+            log.rotation.z = Math.PI / 2;
+            log.rotation.x = (Math.random() - 0.5) * 0.04;
+            log.position.set(
+                (Math.random() - 0.5) * 0.05,
+                logRad + r * (logRad * 1.85),
+                offset + i * (logRad * 2.05) - (perRow - 1) * logRad,
+            );
+            log.castShadow = true;
+            log.receiveShadow = true;
+            pile.add(log);
+        }
+    }
+    pile.position.set(-9.2, 0, -4.2);
+    pile.rotation.y = 0.3;
+    scene.add(pile);
+}
+
+// signpost where two paths meet
+function createSignpost() {
+    const post = new THREE.Group();
+
+    const woodMat = new THREE.MeshStandardMaterial({
+        color: 0x4a3219,
+        roughness: 0.95,
+        metalness: 0.05,
+    });
+    wetMaterials.push({ material: woodMat, dryRoughness: 0.95, wetRoughness: 0.5, dryMetalness: 0.05, wetMetalness: 0.2 });
+
+    const stick = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.12, 0.14, 3.5, 8),
+        woodMat,
+    );
+    stick.position.y = 1.75;
+    stick.castShadow = true;
+    stick.receiveShadow = true;
+    post.add(stick);
+
+    const arrow = (length, height, dir, color, y) => {
+        const sign = new THREE.Mesh(
+            new THREE.BoxGeometry(length, height, 0.12),
+            new THREE.MeshStandardMaterial({ color, roughness: 0.9 }),
+        );
+        sign.position.set(Math.cos(dir) * (length / 2), y, Math.sin(dir) * (length / 2));
+        sign.rotation.y = -dir;
+        sign.castShadow = true;
+        post.add(sign);
+    };
+
+    arrow(1.8, 0.45, 0, 0x6b4423, 3.0);
+    arrow(1.6, 0.4, Math.PI / 2 + 0.4, 0x584023, 2.4);
+    arrow(1.6, 0.4, Math.PI + 0.2, 0x6b5a3a, 1.9);
+
+    post.position.set(28, 0, -16);
+    scene.add(post);
+}
+
+// scattered mushrooms and small flower clusters across the meadow
+function createForestFloor() {
+    const mushroomCapMat = new THREE.MeshStandardMaterial({
+        color: 0xb24432,
+        roughness: 0.7,
+        metalness: 0.0,
+    });
+    const mushroomStemMat = new THREE.MeshStandardMaterial({
+        color: 0xf2e3c1,
+        roughness: 0.95,
+        metalness: 0.0,
+    });
+    const flowerColors = [0xff6688, 0xffe066, 0xc7a3ff, 0xfff5e1, 0xff9a44];
+
+    let placed = 0;
+    let attempts = 0;
+    while (placed < 90 && attempts < 600) {
+        attempts += 1;
+        const x = (Math.random() - 0.5) * 280;
+        const z = (Math.random() - 0.5) * 280;
+        const distFromCamp = Math.hypot(x, z);
+        const distFromLake = Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z);
+        if (distFromCamp < 14 || distFromLake < 42) continue;
+
+        if (Math.random() < 0.45) {
+            const cluster = new THREE.Group();
+            const count = 1 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < count; i += 1) {
+                const stem = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.07, 0.09, 0.5, 6),
+                    mushroomStemMat,
+                );
+                stem.position.set((Math.random() - 0.5) * 0.6, 0.25, (Math.random() - 0.5) * 0.6);
+                stem.castShadow = true;
+                stem.receiveShadow = true;
+                cluster.add(stem);
+
+                const cap = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.22, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+                    mushroomCapMat,
+                );
+                cap.position.copy(stem.position);
+                cap.position.y = 0.55;
+                cap.castShadow = true;
+                cluster.add(cap);
+            }
+            cluster.position.set(x, 0, z);
+            scene.add(cluster);
+        } else {
+            const cluster = new THREE.Group();
+            const count = 3 + Math.floor(Math.random() * 4);
+            const colorHex = flowerColors[Math.floor(Math.random() * flowerColors.length)];
+            const flowerMat = new THREE.MeshStandardMaterial({
+                color: colorHex,
+                emissive: colorHex,
+                emissiveIntensity: 0.15,
+                roughness: 0.8,
+            });
+            const stemMat = new THREE.MeshStandardMaterial({
+                color: 0x3d6e2f,
+                roughness: 1.0,
+            });
+            for (let i = 0; i < count; i += 1) {
+                const sx = (Math.random() - 0.5) * 1.5;
+                const sz = (Math.random() - 0.5) * 1.5;
+                const stem = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.03, 0.04, 0.5, 5),
+                    stemMat,
+                );
+                stem.position.set(sx, 0.25, sz);
+                cluster.add(stem);
+                const head = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.13, 8, 6),
+                    flowerMat,
+                );
+                head.position.set(sx, 0.55, sz);
+                cluster.add(head);
+            }
+            cluster.position.set(x, 0, z);
+            scene.add(cluster);
+        }
+        placed += 1;
+    }
+}
+
+// big aurora curtain in the sky, only visible at night
+function createAurora() {
+    const geometry = new THREE.PlaneGeometry(700, 110, 80, 12);
+    const material = new THREE.ShaderMaterial({
+        uniforms: {
+            uTime: { value: 0 },
+            uIntensity: { value: 0 },
+            uColorA: { value: new THREE.Color('#3effa5') },
+            uColorB: { value: new THREE.Color('#62e0ff') },
+            uColorC: { value: new THREE.Color('#b078ff') },
+        },
+        vertexShader: auroraVertexShader,
+        fragmentShader: auroraFragmentShader,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        fog: false,
+    });
+    aurora = new THREE.Mesh(geometry, material);
+    aurora.position.set(0, 220, -260);
+    aurora.rotation.x = 0.25;
+    aurora.renderOrder = -1;
+    scene.add(aurora);
+}
+
+// thin constellation lines drawn in the sky between selected stars
+function createConstellations() {
+    const segments = [];
+    // a few hand-picked constellation shapes
+    const shapes = [
+        [
+            new THREE.Vector3(-180, 240, -300),
+            new THREE.Vector3(-150, 260, -300),
+            new THREE.Vector3(-130, 250, -310),
+            new THREE.Vector3(-110, 270, -300),
+            new THREE.Vector3(-90, 255, -310),
+        ],
+        [
+            new THREE.Vector3(120, 230, -310),
+            new THREE.Vector3(140, 250, -300),
+            new THREE.Vector3(160, 245, -310),
+            new THREE.Vector3(180, 260, -300),
+        ],
+        [
+            new THREE.Vector3(-30, 280, -350),
+            new THREE.Vector3(-10, 300, -340),
+            new THREE.Vector3(20, 290, -350),
+            new THREE.Vector3(30, 270, -340),
+        ],
+    ];
+    shapes.forEach(points => {
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+            color: 0xbfd5ff,
+            transparent: true,
+            opacity: 0.0,
+            depthWrite: false,
+            fog: false,
+        }));
+        line.renderOrder = -2;
+        segments.push(line);
+        scene.add(line);
+    });
+    constellations = segments;
+}
+
+// shooting stars are spawned occasionally at night
+function spawnShootingStar() {
+    const start = new THREE.Vector3(
+        (Math.random() - 0.5) * 500,
+        180 + Math.random() * 80,
+        -200 - Math.random() * 200,
+    );
+    const direction = new THREE.Vector3(
+        (Math.random() - 0.5) * 0.8,
+        -0.4 - Math.random() * 0.3,
+        Math.random() * 0.6,
+    ).normalize().multiplyScalar(220);
+    const end = start.clone().add(direction);
+    const points = [start, end];
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const mat = new THREE.LineBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.0,
+        depthWrite: false,
+        fog: false,
+    });
+    const line = new THREE.Line(geo, mat);
+    line.renderOrder = -1;
+    scene.add(line);
+    shootingStars.push({
+        line,
+        life: 0,
+        maxLife: 1.2 + Math.random() * 0.8,
+    });
+}
+
+// silhouette deer that walks slowly along a curved path through the meadow
+function createDeer() {
+    deer = new THREE.Group();
+
+    const bodyMat = new THREE.MeshStandardMaterial({
+        color: 0x4a2f1c,
+        roughness: 0.9,
+        metalness: 0.05,
+    });
+    wetMaterials.push({ material: bodyMat, dryRoughness: 0.9, wetRoughness: 0.45, dryMetalness: 0.05, wetMetalness: 0.2 });
+
+    const body = new THREE.Mesh(
+        new THREE.SphereGeometry(0.8, 14, 10),
+        bodyMat,
+    );
+    body.scale.set(1.6, 0.85, 0.95);
+    body.position.y = 1.5;
+    body.castShadow = true;
+    deer.add(body);
+
+    const neck = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.22, 0.32, 1.2, 10),
+        bodyMat,
+    );
+    neck.rotation.z = -0.6;
+    neck.position.set(1.3, 2.0, 0);
+    neck.castShadow = true;
+    deer.add(neck);
+
+    const head = new THREE.Mesh(
+        new THREE.SphereGeometry(0.34, 14, 10),
+        bodyMat,
+    );
+    head.position.set(1.85, 2.45, 0);
+    head.scale.set(1.3, 0.9, 0.8);
+    head.castShadow = true;
+    deer.add(head);
+
+    // simple branching antlers
+    const antlerMat = new THREE.MeshStandardMaterial({ color: 0xc6a06d, roughness: 0.7 });
+    for (const side of [-1, 1]) {
+        const antler = new THREE.Group();
+        const main = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 0.7, 6), antlerMat);
+        main.rotation.z = -0.4;
+        main.position.y = 0.35;
+        antler.add(main);
+        for (let i = 0; i < 2; i += 1) {
+            const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.04, 0.4, 6), antlerMat);
+            branch.position.set(0.2 + i * 0.1, 0.5 + i * 0.15, 0);
+            branch.rotation.z = -1.2 - i * 0.4;
+            antler.add(branch);
+        }
+        antler.position.set(1.95, 2.65, side * 0.18);
+        deer.add(antler);
+    }
+
+    // legs
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x3a2316, roughness: 0.9 });
+    const legPositions = [
+        [0.8, 0.0, 0.4], [0.8, 0.0, -0.4],
+        [-0.7, 0.0, 0.4], [-0.7, 0.0, -0.4],
+    ];
+    deer.userData.legs = [];
+    legPositions.forEach((p, idx) => {
+        const leg = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.1, 0.12, 1.4, 6),
+            legMat,
+        );
+        leg.position.set(p[0], 0.7, p[2]);
+        leg.castShadow = true;
+        deer.add(leg);
+        deer.userData.legs.push({ mesh: leg, baseX: p[0], baseZ: p[2], phase: idx * Math.PI / 2 });
+    });
+
+    // a Catmull-Rom path that the deer loops along, far from camp
+    const pathPoints = [
+        new THREE.Vector3(-50, 0, 60),
+        new THREE.Vector3(-30, 0, 75),
+        new THREE.Vector3(0, 0, 80),
+        new THREE.Vector3(40, 0, 70),
+        new THREE.Vector3(70, 0, 40),
+        new THREE.Vector3(80, 0, 10),
+        new THREE.Vector3(60, 0, -10),
+        new THREE.Vector3(20, 0, 10),
+        new THREE.Vector3(-20, 0, 30),
+    ];
+    deer.userData.curve = new THREE.CatmullRomCurve3(pathPoints, true, 'catmullrom', 0.5);
+
+    deer.position.copy(deer.userData.curve.getPoint(0));
+    scene.add(deer);
+}
+
 // make trees around the scene
 function createForest() {
     const trunkGeometry = new THREE.CylinderGeometry(0.8, 1.2, 9, 8);
@@ -706,17 +1481,18 @@ function createForest() {
     });
     wetMaterials.push({ material: leavesMaterial, dryRoughness: 0.9, wetRoughness: 0.45, dryMetalness: 0.03, wetMetalness: 0.18 });
 
-    const treeCount = 85;
+    const treeCount = 60;
     for (let i = 0; i < treeCount; i += 1) {
         const angle = Math.random() * Math.PI * 2;
         const radius = 90 + Math.random() * 125;
         const x = Math.cos(angle) * radius;
         const z = Math.sin(angle) * radius;
 
-        // keep center area open for camp and exclude the lake area
+        // keep center area open for camp, exclude the lake, and keep the cabin clearing open
         const distFromCamp = Math.hypot(x, z);
         const distFromLake = Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z);
-        if (distFromCamp < 55 || distFromLake < 48) {
+        const distFromCabin = Math.hypot(x - (-110), z - (-95));
+        if (distFromCamp < 55 || distFromLake < 48 || distFromCabin < 18) {
             continue;
         }
 
@@ -1119,7 +1895,7 @@ function createSkyElements() {
 
     // stars sit on a dome well beyond the sun and moon
     const starGeometry = new THREE.BufferGeometry();
-    const starCount = 1100;
+    const starCount = 650;
     const starPositions = new Float32Array(starCount * 3);
     for (let i = 0; i < starCount; i += 1) {
         const radius = 600 + Math.random() * 180;
@@ -1171,11 +1947,11 @@ function createLights() {
     scene.add(sunLight.target);
 
     // main warm point light at the heart of the fire, reaches far enough to touch nearby trees
+    // shadow casting disabled here -- a PointLight shadow renders the scene 6 times per frame
+    // and the spot light below already provides shadows for the camp area
     campfireLight = new THREE.PointLight(0xff8b2f, state.campfireIntensity, 140, 1.7);
     campfireLight.position.set(0, 4.5, 0);
-    campfireLight.castShadow = true;
-    campfireLight.shadow.mapSize.set(1024, 1024);
-    campfireLight.shadow.bias = -0.0009;
+    campfireLight.castShadow = false;
     scene.add(campfireLight);
 
     // wider downward spot pours focused light onto the ground around the camp
@@ -1183,7 +1959,7 @@ function createLights() {
     campfireSpotLight.position.set(0, 12, 0);
     campfireSpotLight.target.position.set(0, 0, 0);
     campfireSpotLight.castShadow = true;
-    campfireSpotLight.shadow.mapSize.set(1024, 1024);
+    campfireSpotLight.shadow.mapSize.set(512, 512);
     scene.add(campfireSpotLight);
     scene.add(campfireSpotLight.target);
 
@@ -1201,7 +1977,7 @@ function createLights() {
 
 // build glowing fireflies that drift through the forest at night
 function createFireflies() {
-    const count = 130;
+    const count = 70;
     const positions = new Float32Array(count * 3);
     const seeds = new Float32Array(count);
     const basePositions = new Float32Array(count * 3);
@@ -1755,6 +2531,12 @@ function setupGUI() {
     wildlifeFolder.add(state, 'tungSahurEnabled').name('Tung Sahur');
     wildlifeFolder.open();
 
+    const atmosphereFolder = gui.addFolder('Atmosphere');
+    atmosphereFolder.add(state, 'auroraEnabled').name('Aurora (night)');
+    atmosphereFolder.add(state, 'constellationsEnabled').name('Constellations');
+    atmosphereFolder.add(state, 'shootingStarsEnabled').name('Shooting Stars');
+    atmosphereFolder.open();
+
     const demoFolder = gui.addFolder('Cinematic Demo');
     demoFolder
         .add(state, 'demoMode')
@@ -1941,6 +2723,102 @@ function animateLanterns(elapsedTime, daylight) {
     });
 }
 
+// animate the cabin windows so they pulse to life at dusk
+function animateCabin(elapsedTime, daylight) {
+    if (!cabinWindows.length) return;
+    const nightFactor = THREE.MathUtils.clamp(1 - daylight * 1.5, 0, 1);
+    const mode = LIGHTING_MODES[state.lightingMode] || LIGHTING_MODES.Realistic;
+    cabinWindows.forEach((win, i) => {
+        const flick = 0.92 + Math.sin(elapsedTime * 4 + i * 1.7) * 0.06 + Math.sin(elapsedTime * 9 + i) * 0.04;
+        win.material.emissiveIntensity = (0.6 + 1.6 * nightFactor) * flick;
+        const winLight = win.userData.light;
+        if (winLight) {
+            winLight.intensity = nightFactor * mode.fireMult * flick * 8;
+        }
+    });
+}
+
+// animate the canoe so it bobs and gently turns on the lake
+function animateCanoe(elapsedTime) {
+    if (!canoe) return;
+    // base height matches createCanoe so the hull stays clear of the water surface even at the bobbing low point
+    canoe.position.y = 0.85 + Math.sin(elapsedTime * 1.2) * 0.07;
+    canoe.rotation.x = Math.sin(elapsedTime * 0.9) * 0.025;
+    canoe.rotation.z = Math.cos(elapsedTime * 0.7 + 0.5) * 0.02;
+    canoe.rotation.y = 1.0 + Math.sin(elapsedTime * 0.3) * 0.05;
+}
+
+// animate the aurora curtain so it ripples and only shows up at night
+function animateAurora(elapsedTime, daylight) {
+    if (!aurora) return;
+    aurora.material.uniforms.uTime.value = elapsedTime;
+    const intensity = THREE.MathUtils.smoothstep(0.32 - daylight, 0, 0.32);
+    aurora.material.uniforms.uIntensity.value = intensity * 0.85;
+    aurora.visible = intensity > 0.01 && state.auroraEnabled !== false;
+}
+
+// fade the constellations in only when the sky is dark enough
+function animateConstellations(elapsedTime, daylight) {
+    if (!constellations) return;
+    const nightFactor = THREE.MathUtils.clamp(1 - daylight * 1.6, 0, 1);
+    constellations.forEach((line, i) => {
+        line.material.opacity = nightFactor * (0.18 + Math.sin(elapsedTime * 0.6 + i) * 0.05);
+        line.visible = nightFactor > 0.05 && state.constellationsEnabled !== false;
+    });
+}
+
+// occasionally spawn a shooting star at night and fade existing ones out
+function animateShootingStars(delta, elapsedTime, daylight) {
+    if (state.shootingStarsEnabled === false) {
+        // hide any active streaks
+        for (const s of shootingStars) {
+            s.line.material.opacity = 0;
+            s.line.visible = false;
+        }
+        return;
+    }
+    const nightFactor = THREE.MathUtils.clamp(1 - daylight * 1.4, 0, 1);
+    if (nightFactor > 0.4 && Math.random() < delta * 0.35) {
+        spawnShootingStar();
+    }
+    for (let i = shootingStars.length - 1; i >= 0; i -= 1) {
+        const s = shootingStars[i];
+        s.life += delta;
+        const t = s.life / s.maxLife;
+        const fade = Math.sin(Math.PI * THREE.MathUtils.clamp(t, 0, 1));
+        s.line.material.opacity = fade * nightFactor;
+        s.line.visible = fade > 0.01;
+        if (s.life >= s.maxLife) {
+            scene.remove(s.line);
+            s.line.geometry.dispose();
+            s.line.material.dispose();
+            shootingStars.splice(i, 1);
+        }
+    }
+}
+
+// walk the deer along a smooth catmull-rom curve, with leg sway
+function animateDeer(elapsedTime) {
+    if (!deer || !deer.userData.curve) return;
+    const speed = 0.012;
+    const t = (elapsedTime * speed) % 1;
+    const next = (t + 0.001) % 1;
+    const pos = deer.userData.curve.getPoint(t);
+    const ahead = deer.userData.curve.getPoint(next);
+    deer.position.copy(pos);
+    deer.position.y += Math.sin(elapsedTime * 6) * 0.05;
+
+    const heading = Math.atan2(ahead.x - pos.x, ahead.z - pos.z);
+    deer.rotation.y = heading - Math.PI / 2;
+
+    // subtle leg swing for walking
+    if (deer.userData.legs) {
+        deer.userData.legs.forEach(leg => {
+            leg.mesh.rotation.x = Math.sin(elapsedTime * 4 + leg.phase) * 0.4;
+        });
+    }
+}
+
 // animate campfire particles
 function animateCampfireParticles(delta, daylight) {
     if (!sparkParticles || !smokeParticles) {
@@ -2074,13 +2952,16 @@ function animateWeather(delta) {
     rain.visible = rainAmount > 0.01;
     rain.material.opacity = rainAmount * 0.8;
 
-    const positions = rain.geometry.attributes.position;
-    const speeds = rain.geometry.attributes.aSpeed;
-    for (let i = 0; i < positions.count; i += 1) {
-        const y = positions.getY(i) - speeds.getX(i) * delta * (0.25 + rainAmount);
-        positions.setY(i, y < 0 ? 170 + Math.random() * 30 : y);
+    // only run the 5000-particle update when rain is actually visible
+    if (rain.visible) {
+        const positions = rain.geometry.attributes.position;
+        const speeds = rain.geometry.attributes.aSpeed;
+        for (let i = 0; i < positions.count; i += 1) {
+            const y = positions.getY(i) - speeds.getX(i) * delta * (0.25 + rainAmount);
+            positions.setY(i, y < 0 ? 170 + Math.random() * 30 : y);
+        }
+        positions.needsUpdate = true;
     }
-    positions.needsUpdate = true;
 
     const wetLevel = state.weatherEnabled ? state.wetness : 0;
     wetMaterials.forEach(item => {
@@ -2113,6 +2994,12 @@ function animate() {
     animateCampfireParticles(delta, daylight);
     animateTorches(elapsed, daylight);
     animateLanterns(elapsed, daylight);
+    animateCabin(elapsed, daylight);
+    animateCanoe(elapsed);
+    animateAurora(elapsed, daylight);
+    animateConstellations(elapsed, daylight);
+    animateShootingStars(delta, elapsed, daylight);
+    animateDeer(elapsed);
     animateWeather(delta);
     animateFireflies(elapsed, daylight);
     animateBirds(elapsed, daylight);
