@@ -43,6 +43,7 @@ const birds = [];
 let sunLight;
 let campfireLight;
 let campfireSpotLight;
+let campfireAreaLight;
 let ambientLight;
 let hemisphereLight;
 let lakeAreaLight;
@@ -830,20 +831,28 @@ function createLights() {
     sunLight.target.position.set(0, 0, 0);
     scene.add(sunLight.target);
 
-    campfireLight = new THREE.PointLight(0xff8b2f, state.campfireIntensity, 90, 2.0);
+    // main warm point light at the heart of the fire, reaches far enough to touch nearby trees
+    campfireLight = new THREE.PointLight(0xff8b2f, state.campfireIntensity, 140, 1.7);
     campfireLight.position.set(0, 4.5, 0);
     campfireLight.castShadow = true;
     campfireLight.shadow.mapSize.set(1024, 1024);
     campfireLight.shadow.bias = -0.0009;
     scene.add(campfireLight);
 
-    campfireSpotLight = new THREE.SpotLight(0xffb066, 1.3, 70, Math.PI / 4, 0.45, 1.2);
-    campfireSpotLight.position.set(0, 11, 0);
+    // wider downward spot pours focused light onto the ground around the camp
+    campfireSpotLight = new THREE.SpotLight(0xffb066, 1.3, 110, Math.PI / 3, 0.55, 1.3);
+    campfireSpotLight.position.set(0, 12, 0);
     campfireSpotLight.target.position.set(0, 0, 0);
     campfireSpotLight.castShadow = true;
     campfireSpotLight.shadow.mapSize.set(1024, 1024);
     scene.add(campfireSpotLight);
     scene.add(campfireSpotLight.target);
+
+    // soft warm area light that gives the campfire true surrounding illumination
+    campfireAreaLight = new THREE.RectAreaLight(0xff8a3a, 4.0, 28, 28);
+    campfireAreaLight.position.set(0, 9, 0);
+    campfireAreaLight.lookAt(0, 0, 0);
+    scene.add(campfireAreaLight);
 
     lakeAreaLight = new THREE.RectAreaLight(0x99c5ff, 2.2, 20, 9);
     lakeAreaLight.position.set(LAKE_CENTER.x, 6, LAKE_CENTER.z);
@@ -1547,11 +1556,16 @@ function animateCampfire(elapsedTime, daylight) {
     });
 
     const flicker = 0.82 + Math.sin(elapsedTime * 24) * 0.15 + Math.sin(elapsedTime * 38) * 0.08;
-    const nightBoost = THREE.MathUtils.lerp(1.25, 0.9, daylight);
+    // much stronger at night so the camp glow actually pushes back the dark
+    const nightBoost = THREE.MathUtils.lerp(2.6, 0.55, daylight);
     const mode = LIGHTING_MODES[state.lightingMode] || LIGHTING_MODES.Realistic;
     const fireIntensity = state.campfireIntensity * flicker * nightBoost * mode.fireMult;
-    campfireLight.intensity = fireIntensity;
-    campfireSpotLight.intensity = fireIntensity * 0.7;
+    // multipliers convert the user-facing slider into physically meaningful candela values
+    campfireLight.intensity = fireIntensity * 38;
+    campfireSpotLight.intensity = fireIntensity * 22;
+    if (campfireAreaLight) {
+        campfireAreaLight.intensity = fireIntensity * 4.5;
+    }
 }
 
 // animate campfire particles
