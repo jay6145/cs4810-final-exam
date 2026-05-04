@@ -287,6 +287,13 @@ function createLakeOutline(segments, baseRadius, variation) {
 // fixed lake center used by createLake and createLights
 const LAKE_CENTER = new THREE.Vector3(78, 0.08, -58);
 
+// how far the sun and moon orbit, kept far in the sky
+const SKY_DISTANCE = 480;
+// vertical squash so the arc feels like a celestial dome
+const SKY_Y_RATIO = 0.85;
+// where the directional sun light sits along the sun direction
+const SUN_LIGHT_DISTANCE = 180;
+
 // make the lake and shoreline
 function createLake() {
     const outlinePoints = createLakeOutline(72, 34, 4.5);
@@ -744,26 +751,42 @@ function createCampfireParticles() {
 // make sun moon and stars
 function createSkyElements() {
     sunMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(9, 24, 24),
-        new THREE.MeshBasicMaterial({ color: 0xffdf70 })
+        new THREE.SphereGeometry(22, 32, 32),
+        new THREE.MeshBasicMaterial({
+            color: 0xffdf70,
+            transparent: true,
+            opacity: 1,
+            depthWrite: false,
+            fog: false,
+        })
     );
+    sunMesh.renderOrder = -1;
     scene.add(sunMesh);
 
     moonMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(6.5, 24, 24),
-        new THREE.MeshBasicMaterial({ color: 0xdde4ff })
+        new THREE.SphereGeometry(16, 32, 32),
+        new THREE.MeshBasicMaterial({
+            color: 0xdde4ff,
+            transparent: true,
+            opacity: 1,
+            depthWrite: false,
+            fog: false,
+        })
     );
+    moonMesh.renderOrder = -1;
     scene.add(moonMesh);
 
+    // stars sit on a dome well beyond the sun and moon
     const starGeometry = new THREE.BufferGeometry();
-    const starCount = 900;
+    const starCount = 1100;
     const starPositions = new Float32Array(starCount * 3);
     for (let i = 0; i < starCount; i += 1) {
-        const radius = 320 + Math.random() * 120;
+        const radius = 600 + Math.random() * 180;
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.acos(THREE.MathUtils.randFloatSpread(2));
         starPositions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
-        starPositions[i * 3 + 1] = Math.abs(radius * Math.cos(phi)) + 15;
+        // keep all stars above the horizon so none show below ground
+        starPositions[i * 3 + 1] = Math.abs(radius * Math.cos(phi)) + 40;
         starPositions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta);
     }
     starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
@@ -772,12 +795,15 @@ function createSkyElements() {
         starGeometry,
         new THREE.PointsMaterial({
             color: 0xe5ecff,
-            size: 1.2,
+            size: 1.6,
             sizeAttenuation: true,
             transparent: true,
             opacity: 0.9,
+            depthWrite: false,
+            fog: false,
         })
     );
+    stars.renderOrder = -2;
     scene.add(stars);
 }
 
@@ -915,14 +941,14 @@ function createBirds() {
     }
 }
 
-// build the tung tung tung sahur character: a flat wooden cricket-bat creature
+// build the tung tung tung sahur character: a wooden cylinder body
 // with a big toothy grin, expressive eyes, skinny limbs, and a held bat
 function createTungSahur() {
     const group = new THREE.Group();
 
     const bodyHeight = 4.0;
     const bodyBottomY = 1.55;
-    const halfWidth = 0.95;
+    const bodyRadius = 0.85;
 
     const bodyMat = new THREE.MeshStandardMaterial({
         color: 0xb87a3f,
@@ -938,41 +964,20 @@ function createTungSahur() {
     });
     wetMaterials.push({ material: limbMat, dryRoughness: 0.85, wetRoughness: 0.45, dryMetalness: 0.04, wetMetalness: 0.2 });
 
-    // flat paddle/cricket-bat body via extruded shape
-    const bodyShape = new THREE.Shape();
-    bodyShape.moveTo(-halfWidth * 0.95, 0);
-    bodyShape.lineTo(halfWidth * 0.95, 0);
-    bodyShape.bezierCurveTo(
-        halfWidth, bodyHeight * 0.06,
-        halfWidth, bodyHeight * 0.7,
-        halfWidth * 0.93, bodyHeight * 0.86
+    // simple cylinder body
+    const body = new THREE.Mesh(
+        new THREE.CylinderGeometry(bodyRadius, bodyRadius, bodyHeight, 32),
+        bodyMat
     );
-    bodyShape.quadraticCurveTo(halfWidth * 0.6, bodyHeight * 1.04, 0, bodyHeight * 1.06);
-    bodyShape.quadraticCurveTo(-halfWidth * 0.6, bodyHeight * 1.04, -halfWidth * 0.93, bodyHeight * 0.86);
-    bodyShape.bezierCurveTo(
-        -halfWidth, bodyHeight * 0.7,
-        -halfWidth, bodyHeight * 0.06,
-        -halfWidth * 0.95, 0
-    );
-
-    const extrudeSettings = {
-        depth: 0.55,
-        bevelEnabled: true,
-        bevelThickness: 0.18,
-        bevelSize: 0.16,
-        bevelSegments: 4,
-        curveSegments: 24,
-    };
-    const bodyGeo = new THREE.ExtrudeGeometry(bodyShape, extrudeSettings);
-    bodyGeo.translate(0, 0, -extrudeSettings.depth / 2);
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.position.y = bodyBottomY;
+    body.position.y = bodyBottomY + bodyHeight / 2;
     body.castShadow = true;
     body.receiveShadow = true;
     group.add(body);
 
-    // front of body (with bevel) sticks out to about z = depth/2 + bevelThickness
-    const faceZ = extrudeSettings.depth / 2 + extrudeSettings.bevelThickness;
+    // helper: place a face feature on the curved cylinder front, optionally pushed outward
+    function frontZ(x, offset = 0) {
+        return Math.sqrt(Math.max(0, bodyRadius * bodyRadius - x * x)) + offset;
+    }
 
     // eye builder: white sclera, brown iris, black pupil, bright highlight
     function makeEye() {
@@ -1003,29 +1008,36 @@ function createTungSahur() {
         return eye;
     }
 
+    // eyes - placed on the curved front and rotated to face radially outward
     const eyeY = bodyBottomY + bodyHeight * 0.78;
+    const eyeX = 0.36;
     const leftEye = makeEye();
-    leftEye.position.set(-0.42, eyeY, faceZ + 0.05);
+    leftEye.position.set(-eyeX, eyeY, frontZ(-eyeX, 0.05));
+    leftEye.rotation.y = Math.atan2(leftEye.position.x, leftEye.position.z);
     group.add(leftEye);
     const rightEye = makeEye();
-    rightEye.position.set(0.42, eyeY, faceZ + 0.05);
+    rightEye.position.set(eyeX, eyeY, frontZ(eyeX, 0.05));
+    rightEye.rotation.y = Math.atan2(rightEye.position.x, rightEye.position.z);
     group.add(rightEye);
 
-    // thin raised brows above the eyes
+    // thin raised brows above the eyes (wrapped so they also face outward)
     const browGeo = new THREE.BoxGeometry(0.36, 0.05, 0.06);
     const browMat = new THREE.MeshBasicMaterial({ color: 0x1a0c04 });
-    const leftBrow = new THREE.Mesh(browGeo, browMat);
-    leftBrow.position.set(-0.42, eyeY + 0.4, faceZ + 0.18);
-    leftBrow.rotation.z = 0.18;
-    group.add(leftBrow);
-    const rightBrow = new THREE.Mesh(browGeo, browMat);
-    rightBrow.position.set(0.42, eyeY + 0.4, faceZ + 0.18);
-    rightBrow.rotation.z = -0.18;
-    group.add(rightBrow);
+    function addBrow(x, tilt) {
+        const wrapper = new THREE.Group();
+        wrapper.position.set(x, eyeY + 0.4, frontZ(x, 0.18));
+        wrapper.rotation.y = Math.atan2(wrapper.position.x, wrapper.position.z);
+        const brow = new THREE.Mesh(browGeo, browMat);
+        brow.rotation.z = tilt;
+        wrapper.add(brow);
+        group.add(wrapper);
+    }
+    addBrow(-eyeX, 0.18);
+    addBrow(eyeX, -0.18);
 
-    // wide curved smile shape
+    // wide curved smile shape, wrapped onto the cylinder surface so it follows the body curve
     const mouthY = bodyBottomY + bodyHeight * 0.5;
-    const mw = 0.6;
+    const mw = 0.55;
     const mh = 0.32;
     const mouthShape = new THREE.Shape();
     mouthShape.moveTo(-mw, 0.04);
@@ -1034,45 +1046,54 @@ function createTungSahur() {
     mouthShape.quadraticCurveTo(mw * 0.55, -mh, 0, -mh * 1.1);
     mouthShape.quadraticCurveTo(-mw * 0.55, -mh, -mw, 0.04);
     const mouthGeo = new THREE.ShapeGeometry(mouthShape, 24);
+    const mouthPositions = mouthGeo.attributes.position;
+    for (let i = 0; i < mouthPositions.count; i += 1) {
+        const px = mouthPositions.getX(i);
+        const angle = px / bodyRadius;
+        mouthPositions.setX(i, bodyRadius * Math.sin(angle));
+        mouthPositions.setZ(i, bodyRadius * Math.cos(angle) + 0.02);
+    }
+    mouthPositions.needsUpdate = true;
+    mouthGeo.computeVertexNormals();
     const mouth = new THREE.Mesh(
         mouthGeo,
         new THREE.MeshBasicMaterial({ color: 0x180a05, side: THREE.DoubleSide })
     );
-    mouth.position.set(0, mouthY, faceZ + 0.12);
+    mouth.position.set(0, mouthY, 0);
     group.add(mouth);
 
-    // white teeth strip across the upper part of the smile
-    const teethStrip = new THREE.Mesh(
-        new THREE.BoxGeometry(mw * 1.7, 0.11, 0.04),
-        new THREE.MeshBasicMaterial({ color: 0xf2e8d3 })
-    );
-    teethStrip.position.set(0, mouthY + 0.08, faceZ + 0.16);
-    group.add(teethStrip);
-
-    // dark dividers between individual teeth
-    for (let i = -2; i <= 2; i += 1) {
-        const divider = new THREE.Mesh(
-            new THREE.BoxGeometry(0.018, 0.11, 0.05),
-            new THREE.MeshBasicMaterial({ color: 0x180a05 })
-        );
-        divider.position.set(i * 0.19, mouthY + 0.08, faceZ + 0.18);
+    // individual teeth that follow the curved smile
+    const toothMat = new THREE.MeshBasicMaterial({ color: 0xf2e8d3 });
+    const dividerMat = new THREE.MeshBasicMaterial({ color: 0x180a05 });
+    const toothGeo = new THREE.BoxGeometry(0.13, 0.11, 0.04);
+    const dividerGeo = new THREE.BoxGeometry(0.018, 0.11, 0.05);
+    [-0.32, -0.16, 0, 0.16, 0.32].forEach(tx => {
+        const tooth = new THREE.Mesh(toothGeo, toothMat);
+        tooth.position.set(tx, mouthY + 0.09, frontZ(tx, 0.04));
+        tooth.rotation.y = Math.atan2(tx, frontZ(tx));
+        group.add(tooth);
+    });
+    [-0.24, -0.08, 0.08, 0.24].forEach(dx => {
+        const divider = new THREE.Mesh(dividerGeo, dividerMat);
+        divider.position.set(dx, mouthY + 0.09, frontZ(dx, 0.05));
+        divider.rotation.y = Math.atan2(dx, frontZ(dx));
         group.add(divider);
-    }
+    });
 
-    // shoulder pivots for swinging arms
+    // arms attached directly to the SIDE of the cylinder body, hanging straight down
     const shoulderY = bodyBottomY + bodyHeight * 0.55;
     const armGeo = new THREE.CylinderGeometry(0.085, 0.06, 1.5, 12);
     armGeo.translate(0, -0.75, 0);
 
     const leftArm = new THREE.Mesh(armGeo, limbMat);
-    leftArm.position.set(-(halfWidth + 0.05), shoulderY, 0);
-    leftArm.rotation.z = 0.18;
+    leftArm.position.set(-bodyRadius, shoulderY, 0);
+    leftArm.rotation.z = -0.06;
     leftArm.castShadow = true;
     group.add(leftArm);
 
     const rightArm = new THREE.Mesh(armGeo, limbMat);
-    rightArm.position.set(halfWidth + 0.05, shoulderY, 0);
-    rightArm.rotation.z = -0.18;
+    rightArm.position.set(bodyRadius, shoulderY, 0);
+    rightArm.rotation.z = 0.06;
     rightArm.castShadow = true;
     group.add(rightArm);
 
@@ -1438,22 +1459,31 @@ function onWindowResize() {
 // update day and night lighting
 function updateDayNightLighting() {
     const sunOrbit = state.timeOfDay * Math.PI * 2 - Math.PI / 2;
-    const sunPosition = new THREE.Vector3(
-        Math.cos(sunOrbit) * 175,
-        Math.sin(sunOrbit) * 130,
-        -35
-    );
-    sunMesh.position.copy(sunPosition);
-    sunLight.position.copy(sunPosition);
+    const sinSun = Math.sin(sunOrbit);
+    const cosSun = Math.cos(sunOrbit);
 
-    const moonPosition = new THREE.Vector3(
-        Math.cos(sunOrbit + Math.PI) * 175,
-        Math.sin(sunOrbit + Math.PI) * 130,
-        -25
+    // visual sun sits far out on the sky dome
+    const sunMeshPos = new THREE.Vector3(
+        cosSun * SKY_DISTANCE,
+        sinSun * SKY_DISTANCE * SKY_Y_RATIO,
+        -SKY_DISTANCE * 0.18
     );
-    moonMesh.position.copy(moonPosition);
+    sunMesh.position.copy(sunMeshPos);
 
-    const daylight = THREE.MathUtils.clamp((sunPosition.y + 8) / 130, 0, 1);
+    // directional light sits closer along the same direction so shadow camera still covers the scene
+    const sunDir = sunMeshPos.clone().normalize();
+    sunLight.position.copy(sunDir.multiplyScalar(SUN_LIGHT_DISTANCE));
+
+    // moon mirrors the sun on the opposite side of the sky
+    const moonMeshPos = new THREE.Vector3(
+        -cosSun * SKY_DISTANCE,
+        -sinSun * SKY_DISTANCE * SKY_Y_RATIO,
+        -SKY_DISTANCE * 0.13
+    );
+    moonMesh.position.copy(moonMeshPos);
+
+    // daylight is driven directly by the sun angle so it does not depend on distance
+    const daylight = THREE.MathUtils.clamp(sinSun + 0.06, 0, 1);
     const duskFactor = 1 - Math.abs(daylight - 0.45) / 0.45;
     const twilight = THREE.MathUtils.clamp(duskFactor, 0, 1);
 
@@ -1484,8 +1514,17 @@ function updateDayNightLighting() {
 
     stars.visible = daylight < 0.35;
     stars.material.opacity = THREE.MathUtils.lerp(0.05, 0.95, 1 - daylight);
-    moonMesh.visible = daylight < 0.6;
-    sunMesh.visible = sunPosition.y > -20;
+
+    // fade the sun out smoothly as it dips toward and past the horizon so it never punches through the ground
+    const sunHorizonFade = THREE.MathUtils.smoothstep(sunMeshPos.y, -4, 22);
+    sunMesh.material.opacity = sunHorizonFade;
+    sunMesh.visible = sunHorizonFade > 0.01;
+
+    // moon only shows when its above the horizon and the sky is dim enough
+    const moonHorizonFade = THREE.MathUtils.smoothstep(moonMeshPos.y, -4, 22);
+    const moonNightFade = THREE.MathUtils.smoothstep(0.6 - daylight, 0, 0.18);
+    moonMesh.material.opacity = moonHorizonFade * moonNightFade;
+    moonMesh.visible = moonMesh.material.opacity > 0.01;
 }
 
 // animate campfire movement and light
@@ -1670,8 +1709,9 @@ function animate() {
 
     updateDayNightLighting();
 
-    const sunHeight = sunMesh.position.y;
-    const daylight = THREE.MathUtils.clamp((sunHeight + 8) / 130, 0, 1);
+    // recover sin of the sun angle from its mesh y so daylight matches updateDayNightLighting
+    const sinSunNow = sunMesh.position.y / (SKY_DISTANCE * SKY_Y_RATIO);
+    const daylight = THREE.MathUtils.clamp(sinSunNow + 0.06, 0, 1);
     animateCampfire(elapsed, daylight);
     animateCampfireParticles(delta, daylight);
     animateWeather(delta);
