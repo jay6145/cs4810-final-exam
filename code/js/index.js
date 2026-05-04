@@ -50,6 +50,8 @@ let lakeAreaLight;
 
 const flameMeshes = [];
 const wetMaterials = [];
+// flickering torches placed around the lake
+const torches = [];
 const clock = new THREE.Clock();
 
 // build a soft glowing dot texture for sparks
@@ -216,6 +218,7 @@ function init() {
 
     createTerrain();
     createLake();
+    createTorches();
     createForest();
     createCampfire();
     createCampfireParticles();
@@ -348,6 +351,110 @@ function createLake() {
     shoreRing.position.y = 0.05;
     shoreRing.receiveShadow = true;
     scene.add(shoreRing);
+}
+
+// build wooden torches with flickering shader flames around the lake
+function createTorches() {
+    const torchCount = 8;
+    const ringRadius = 46;
+    const postHeight = 3.6;
+    const postRadius = 0.18;
+
+    const postMaterial = new THREE.MeshStandardMaterial({
+        color: 0x3a2412,
+        roughness: 0.95,
+        metalness: 0.05,
+    });
+    const wrapMaterial = new THREE.MeshStandardMaterial({
+        color: 0x1a1108,
+        roughness: 1.0,
+        metalness: 0.0,
+    });
+    const emberMaterial = new THREE.MeshStandardMaterial({
+        color: 0xff6620,
+        emissive: 0xff5510,
+        emissiveIntensity: 1.4,
+        roughness: 0.6,
+        metalness: 0.0,
+    });
+
+    for (let i = 0; i < torchCount; i += 1) {
+        const angle = (i / torchCount) * Math.PI * 2;
+        const x = LAKE_CENTER.x + Math.cos(angle) * ringRadius;
+        const z = LAKE_CENTER.z + Math.sin(angle) * ringRadius;
+
+        const torchGroup = new THREE.Group();
+        torchGroup.position.set(x, 0, z);
+        // small random yaw and tilt so they don't look mechanical
+        torchGroup.rotation.y = Math.random() * Math.PI * 2;
+        torchGroup.rotation.z = (Math.random() - 0.5) * 0.06;
+
+        const post = new THREE.Mesh(
+            new THREE.CylinderGeometry(postRadius * 0.85, postRadius, postHeight, 8),
+            postMaterial,
+        );
+        post.position.y = postHeight / 2;
+        post.castShadow = true;
+        post.receiveShadow = true;
+        torchGroup.add(post);
+
+        // wrapped/charred top of the post
+        const wrap = new THREE.Mesh(
+            new THREE.CylinderGeometry(postRadius * 1.4, postRadius * 1.4, 0.55, 10),
+            wrapMaterial,
+        );
+        wrap.position.y = postHeight - 0.1;
+        wrap.castShadow = true;
+        torchGroup.add(wrap);
+
+        // glowing ember bowl right under the flame
+        const ember = new THREE.Mesh(
+            new THREE.SphereGeometry(0.28, 12, 8),
+            emberMaterial,
+        );
+        ember.position.y = postHeight + 0.15;
+        torchGroup.add(ember);
+
+        // shader flame, single cone re-using the campfire flame shader
+        const flameMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime: { value: 0 },
+                uIntensity: { value: 1.15 },
+                uColorHot: { value: new THREE.Color('#fff0c4') },
+                uColorMid: { value: new THREE.Color('#ff9c45') },
+                uColorCool: { value: new THREE.Color('#5c1400') },
+                uSeed: { value: i * 1.7 + Math.random() * 2.0 },
+            },
+            vertexShader: flameVertexShader,
+            fragmentShader: flameFragmentShader,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide,
+        });
+        const flame = new THREE.Mesh(
+            new THREE.ConeGeometry(0.42, 1.4, 16, 8, true),
+            flameMaterial,
+        );
+        flame.position.y = postHeight + 0.85;
+        flame.renderOrder = 2;
+        // animateCampfire already drives uTime on every flame in this list
+        flameMeshes.push(flame);
+        torchGroup.add(flame);
+
+        // warm point light at the flame, no shadows for performance
+        const light = new THREE.PointLight(0xffa050, 0, 26, 1.7);
+        light.position.y = postHeight + 0.85;
+        torchGroup.add(light);
+
+        scene.add(torchGroup);
+        torches.push({
+            group: torchGroup,
+            light,
+            phase: Math.random() * Math.PI * 2,
+            speed: 18 + Math.random() * 12,
+        });
+    }
 }
 
 // make trees around the scene
@@ -1564,8 +1671,24 @@ function animateCampfire(elapsedTime, daylight) {
     campfireLight.intensity = fireIntensity * 38;
     campfireSpotLight.intensity = fireIntensity * 22;
     if (campfireAreaLight) {
-        campfireAreaLight.intensity = fireIntensity * 4.5;
+        campfireAreaLight.intensity = fireIntensity * 0.6;
     }
+}
+
+// animate the torches around the lake with per-torch flicker
+function animateTorches(elapsedTime, daylight) {
+    if (!torches.length) {
+        return;
+    }
+    // each torch pushes back the dark much harder at night and fades out at noon
+    const nightBoost = THREE.MathUtils.lerp(2.2, 0.35, daylight);
+    const mode = LIGHTING_MODES[state.lightingMode] || LIGHTING_MODES.Realistic;
+    torches.forEach(torch => {
+        const t = elapsedTime * torch.speed + torch.phase;
+        // independent flicker waveform per torch so the ring breathes
+        const flicker = 0.78 + Math.sin(t) * 0.16 + Math.sin(t * 1.7) * 0.08;
+        torch.light.intensity = flicker * nightBoost * mode.fireMult * 14;
+    });
 }
 
 // animate campfire particles
@@ -1738,6 +1861,7 @@ function animate() {
     const daylight = THREE.MathUtils.clamp(sinSunNow + 0.06, 0, 1);
     animateCampfire(elapsed, daylight);
     animateCampfireParticles(delta, daylight);
+    animateTorches(elapsed, daylight);
     animateWeather(delta);
     animateFireflies(elapsed, daylight);
     animateBirds(elapsed, daylight);
