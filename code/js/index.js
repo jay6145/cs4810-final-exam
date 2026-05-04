@@ -6,6 +6,7 @@ import GUI from 'lil-gui';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import {
     flameVertexShader,
     flameFragmentShader,
@@ -1141,7 +1142,8 @@ function createTungSahur() {
 
     const heldBat = new THREE.Mesh(heldBatGeo, heldBatMat);
     heldBat.position.set(0, 0, 0.04);
-    heldBat.rotation.x = -0.45;
+    heldBat.rotation.x = -0.55;
+    heldBat.scale.setScalar(1.55);
     heldBat.castShadow = true;
     heldBat.receiveShadow = true;
     rightHand.add(heldBat);
@@ -1339,7 +1341,13 @@ function setupPostProcessing() {
     ssaoPass.minDistance = 0.004;
     ssaoPass.maxDistance = 0.16;
     ssaoPass.output = SSAOPass.OUTPUT.Default;
+    // start disabled, GUI toggle controls it
+    ssaoPass.enabled = state.ambientOcclusion;
     composer.addPass(ssaoPass);
+
+    // OutputPass is required after SSAOPass so the multiplicatively-blended result
+    // ends up on the populated scene buffer instead of a cleared canvas
+    composer.addPass(new OutputPass());
 }
 
 // make the gui controls
@@ -1361,7 +1369,9 @@ function setupGUI() {
     shadowFolder.open();
 
     const aoFolder = gui.addFolder('Ambient Occlusion');
-    aoFolder.add(state, 'ambientOcclusion').name('Enabled');
+    aoFolder.add(state, 'ambientOcclusion').name('Enabled').onChange((value) => {
+        if (ssaoPass) ssaoPass.enabled = value;
+    });
     aoFolder.add(state, 'aoRadius', 1, 16, 0.1).name('Radius').onChange(() => {
         ssaoPass.kernelRadius = state.aoRadius;
     });
@@ -1739,12 +1749,12 @@ function animate() {
         controls.update();
     }
 
-    if (state.ambientOcclusion && composer && ssaoPass) {
+    if (composer) {
+        if (ssaoPass) ssaoPass.enabled = state.ambientOcclusion;
         try {
             composer.render();
         } catch (error) {
             console.warn('Post-processing failed, falling back to direct render:', error);
-            state.ambientOcclusion = false;
             renderer.render(scene, camera);
         }
     } else {
