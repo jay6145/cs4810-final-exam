@@ -14,6 +14,10 @@ import {
     smokeVertexShader,
     smokeFragmentShader,
 } from '../shaders/campfireShaders.js';
+import {
+    fireflyVertexShader,
+    fireflyFragmentShader,
+} from '../shaders/wildlifeShaders.js';
 
 // scene variables
 let scene;
@@ -31,6 +35,8 @@ let lake;
 let rain;
 let sparkParticles;
 let smokeParticles;
+let fireflies;
+const birds = [];
 
 let sunLight;
 let campfireLight;
@@ -112,7 +118,70 @@ const state = {
     rainIntensity: 0,
     fogStrength: 0.25,
     wetness: 0,
+    lightingMode: 'Realistic',
+    firefliesEnabled: true,
+    birdsEnabled: true,
+    demoMode: false,
+    demoSpeed: 1.0,
 };
+
+// lighting style presets
+const LIGHTING_MODES = {
+    Realistic: {
+        toneMapping: THREE.ACESFilmicToneMapping,
+        exposure: 1.05,
+        ambientMult: 1.0,
+        hemisphereMult: 1.0,
+        sunMult: 1.0,
+        fireMult: 1.0,
+    },
+    Cinematic: {
+        toneMapping: THREE.CineonToneMapping,
+        exposure: 0.78,
+        ambientMult: 0.55,
+        hemisphereMult: 0.65,
+        sunMult: 1.4,
+        fireMult: 1.5,
+    },
+    Stylized: {
+        toneMapping: THREE.LinearToneMapping,
+        exposure: 1.4,
+        ambientMult: 1.5,
+        hemisphereMult: 1.4,
+        sunMult: 0.95,
+        fireMult: 0.9,
+    },
+};
+
+// cinematic camera flythrough waypoints
+const CAMERA_PATH_POSITIONS = [
+    new THREE.Vector3(0, 14, 28),
+    new THREE.Vector3(35, 18, 25),
+    new THREE.Vector3(70, 24, 0),
+    new THREE.Vector3(120, 30, -55),
+    new THREE.Vector3(78, 50, -120),
+    new THREE.Vector3(0, 70, -170),
+    new THREE.Vector3(-110, 50, -100),
+    new THREE.Vector3(-140, 30, 0),
+    new THREE.Vector3(-50, 22, 60),
+    new THREE.Vector3(0, 14, 28),
+];
+
+const CAMERA_PATH_TARGETS = [
+    new THREE.Vector3(0, 4, 0),
+    new THREE.Vector3(0, 4, 0),
+    new THREE.Vector3(40, 2, -25),
+    new THREE.Vector3(78, 1, -58),
+    new THREE.Vector3(78, 1, -58),
+    new THREE.Vector3(0, 5, -30),
+    new THREE.Vector3(-50, 5, 0),
+    new THREE.Vector3(0, 5, 0),
+    new THREE.Vector3(0, 4, 0),
+    new THREE.Vector3(0, 4, 0),
+];
+
+const cameraCurve = new THREE.CatmullRomCurve3(CAMERA_PATH_POSITIONS, true, 'catmullrom', 0.4);
+const targetCurve = new THREE.CatmullRomCurve3(CAMERA_PATH_TARGETS, true, 'catmullrom', 0.4);
 
 // start the scene
 function init() {
@@ -148,11 +217,14 @@ function init() {
     createCampfireParticles();
     createSkyElements();
     createRain();
+    createFireflies();
+    createBirds();
     createLights();
     setupPostProcessing();
     setupGUI();
     setupButtons();
     applyShadowSettings();
+    applyLightingMode();
     updateDayNightLighting();
 
     window.addEventListener('resize', onWindowResize);
@@ -749,6 +821,197 @@ function createLights() {
     scene.add(lakeAreaLight);
 }
 
+// build glowing fireflies that drift through the forest at night
+function createFireflies() {
+    const count = 130;
+    const positions = new Float32Array(count * 3);
+    const seeds = new Float32Array(count);
+    const basePositions = new Float32Array(count * 3);
+
+    for (let i = 0; i < count; i += 1) {
+        let x;
+        let z;
+        // distribute around camp + forest while staying out of the lake
+        do {
+            x = (Math.random() - 0.5) * 220;
+            z = (Math.random() - 0.5) * 220;
+        } while (Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z) < 40);
+
+        const y = 1.5 + Math.random() * 9;
+        const i3 = i * 3;
+        positions[i3] = x;
+        positions[i3 + 1] = y;
+        positions[i3 + 2] = z;
+        basePositions[i3] = x;
+        basePositions[i3 + 1] = y;
+        basePositions[i3 + 2] = z;
+        seeds[i] = Math.random() * Math.PI * 2;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 1));
+
+    const material = new THREE.ShaderMaterial({
+        uniforms: {
+            uTime: { value: 0 },
+            uTex: { value: makeSparkTexture() },
+            uPixelRatio: { value: renderer.getPixelRatio() },
+            uOpacity: { value: 0 },
+        },
+        vertexShader: fireflyVertexShader,
+        fragmentShader: fireflyFragmentShader,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+    });
+
+    fireflies = new THREE.Points(geometry, material);
+    fireflies.frustumCulled = false;
+    fireflies.userData = { basePositions };
+    scene.add(fireflies);
+}
+
+// build a single bird as a flapping pair of triangle wings
+function createBird() {
+    const group = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial({ color: 0x121212, side: THREE.DoubleSide });
+
+    const leftGeo = new THREE.BufferGeometry();
+    leftGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+        0, 0, 0,
+        -1.6, 0, 0.45,
+        -0.6, 0, 0.55,
+    ]), 3));
+    leftGeo.computeVertexNormals();
+    const leftWing = new THREE.Mesh(leftGeo, mat);
+    group.add(leftWing);
+
+    const rightGeo = new THREE.BufferGeometry();
+    rightGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+        0, 0, 0,
+        0.6, 0, 0.55,
+        1.6, 0, 0.45,
+    ]), 3));
+    rightGeo.computeVertexNormals();
+    const rightWing = new THREE.Mesh(rightGeo, mat);
+    group.add(rightWing);
+
+    group.userData = { leftWing, rightWing };
+    return group;
+}
+
+// build a small flock of birds in V-formation
+function createBirds() {
+    const flockSize = 5;
+    for (let i = 0; i < flockSize; i += 1) {
+        const bird = createBird();
+        bird.scale.setScalar(1.4 + (i === 0 ? 0.25 : 0));
+        scene.add(bird);
+        birds.push(bird);
+    }
+}
+
+// apply tone mapping + multipliers from a preset
+function applyLightingMode() {
+    const mode = LIGHTING_MODES[state.lightingMode];
+    if (!mode || !renderer) {
+        return;
+    }
+    renderer.toneMapping = mode.toneMapping;
+    renderer.toneMappingExposure = mode.exposure;
+    if (typeof updateDayNightLighting === 'function' && scene) {
+        updateDayNightLighting();
+    }
+}
+
+// animate fireflies drifting + pulsing at night
+function animateFireflies(elapsed, daylight) {
+    if (!fireflies) {
+        return;
+    }
+    // visible at dusk + night, hidden during day
+    const nightFactor = THREE.MathUtils.clamp((0.45 - daylight) / 0.4, 0, 1);
+    const isVisible = state.firefliesEnabled && nightFactor > 0.02;
+    fireflies.visible = isVisible;
+    if (!isVisible) {
+        return;
+    }
+
+    fireflies.material.uniforms.uTime.value = elapsed;
+    fireflies.material.uniforms.uOpacity.value = nightFactor;
+
+    const positions = fireflies.geometry.attributes.position;
+    const base = fireflies.userData.basePositions;
+    for (let i = 0; i < positions.count; i += 1) {
+        const i3 = i * 3;
+        const baseX = base[i3];
+        const baseY = base[i3 + 1];
+        const baseZ = base[i3 + 2];
+        positions.array[i3] = baseX + Math.sin(elapsed * 0.35 + i * 0.7) * 1.6;
+        positions.array[i3 + 1] = baseY + Math.cos(elapsed * 0.45 + i * 1.3) * 0.85;
+        positions.array[i3 + 2] = baseZ + Math.cos(elapsed * 0.4 + i * 0.5) * 1.6;
+    }
+    positions.needsUpdate = true;
+}
+
+// animate birds flying in V-formation overhead during the day
+function animateBirds(elapsed, daylight) {
+    if (!birds.length) {
+        return;
+    }
+    const isVisible = state.birdsEnabled && daylight > 0.45;
+
+    const t = elapsed * 0.05;
+    const radius = 115;
+    const height = 70;
+    const tangent = new THREE.Vector3(-Math.sin(t), 0, Math.cos(t));
+    const sideVec = new THREE.Vector3(-tangent.z, 0, tangent.x);
+    const leadX = Math.cos(t) * radius;
+    const leadZ = Math.sin(t) * radius;
+
+    const formation = [
+        { back: 0, side: 0 },
+        { back: 4.5, side: 3.5 },
+        { back: 4.5, side: -3.5 },
+        { back: 9, side: 7 },
+        { back: 9, side: -7 },
+    ];
+
+    const lookTarget = new THREE.Vector3();
+    birds.forEach((bird, idx) => {
+        bird.visible = isVisible;
+        if (!isVisible) {
+            return;
+        }
+        const off = formation[idx] || formation[0];
+        const x = leadX - tangent.x * off.back + sideVec.x * off.side;
+        const z = leadZ - tangent.z * off.back + sideVec.z * off.side;
+        const y = height + Math.sin(elapsed * 0.5 + idx * 0.7) * 1.6;
+
+        bird.position.set(x, y, z);
+        lookTarget.set(x + tangent.x, y, z + tangent.z);
+        bird.lookAt(lookTarget);
+
+        const flap = Math.sin(elapsed * 7 + idx * 0.5) * 0.75;
+        bird.userData.leftWing.rotation.z = -flap;
+        bird.userData.rightWing.rotation.z = flap;
+    });
+}
+
+// drive camera along a smooth catmull-rom path during demo mode
+function updateCinematicCamera(elapsed) {
+    if (!state.demoMode) {
+        return;
+    }
+    // 1 cycle takes ~50s at speed 1
+    const t = ((elapsed * 0.02 * state.demoSpeed) % 1 + 1) % 1;
+    const pos = cameraCurve.getPoint(t);
+    const tgt = targetCurve.getPoint(t);
+    camera.position.copy(pos);
+    camera.lookAt(tgt);
+}
+
 // set up post processing
 function setupPostProcessing() {
     composer = new EffectComposer(renderer);
@@ -803,6 +1066,31 @@ function setupGUI() {
     weatherFolder.add(state, 'fogStrength', 0, 1, 0.01).name('Fog');
     weatherFolder.add(state, 'wetness', 0, 1, 0.01).name('Wet Ground');
     weatherFolder.open();
+
+    const lightingFolder = gui.addFolder('Lighting Mode');
+    lightingFolder
+        .add(state, 'lightingMode', Object.keys(LIGHTING_MODES))
+        .name('Style')
+        .onChange(applyLightingMode);
+    lightingFolder.open();
+
+    const wildlifeFolder = gui.addFolder('Wildlife');
+    wildlifeFolder.add(state, 'firefliesEnabled').name('Fireflies (night)');
+    wildlifeFolder.add(state, 'birdsEnabled').name('Birds (day)');
+    wildlifeFolder.open();
+
+    const demoFolder = gui.addFolder('Cinematic Demo');
+    demoFolder
+        .add(state, 'demoMode')
+        .name('Auto Camera')
+        .onChange(value => {
+            controls.enabled = !value;
+            if (!value) {
+                controls.target.set(0, 4, 0);
+            }
+        });
+    demoFolder.add(state, 'demoSpeed', 0.25, 3, 0.05).name('Speed');
+    demoFolder.open();
 }
 
 // connect ui buttons
@@ -891,9 +1179,10 @@ function updateDayNightLighting() {
         scene.fog.far = 10001;
     }
 
-    ambientLight.intensity = THREE.MathUtils.lerp(0.08, 0.34, daylight);
-    hemisphereLight.intensity = THREE.MathUtils.lerp(0.12, 0.52, daylight);
-    sunLight.intensity = THREE.MathUtils.lerp(0.1, 2.3, daylight);
+    const mode = LIGHTING_MODES[state.lightingMode] || LIGHTING_MODES.Realistic;
+    ambientLight.intensity = THREE.MathUtils.lerp(0.08, 0.34, daylight) * mode.ambientMult;
+    hemisphereLight.intensity = THREE.MathUtils.lerp(0.12, 0.52, daylight) * mode.hemisphereMult;
+    sunLight.intensity = THREE.MathUtils.lerp(0.1, 2.3, daylight) * mode.sunMult;
     lakeAreaLight.intensity = THREE.MathUtils.lerp(2.8, 0.45, daylight);
 
     stars.visible = daylight < 0.35;
@@ -913,7 +1202,8 @@ function animateCampfire(elapsedTime, daylight) {
 
     const flicker = 0.82 + Math.sin(elapsedTime * 24) * 0.15 + Math.sin(elapsedTime * 38) * 0.08;
     const nightBoost = THREE.MathUtils.lerp(1.25, 0.9, daylight);
-    const fireIntensity = state.campfireIntensity * flicker * nightBoost;
+    const mode = LIGHTING_MODES[state.lightingMode] || LIGHTING_MODES.Realistic;
+    const fireIntensity = state.campfireIntensity * flicker * nightBoost * mode.fireMult;
     campfireLight.intensity = fireIntensity;
     campfireSpotLight.intensity = fireIntensity * 0.7;
 }
@@ -1088,6 +1378,9 @@ function animate() {
     animateCampfire(elapsed, daylight);
     animateCampfireParticles(delta, daylight);
     animateWeather(delta);
+    animateFireflies(elapsed, daylight);
+    animateBirds(elapsed, daylight);
+    updateCinematicCamera(elapsed);
 
     const waterTint = new THREE.Color().lerpColors(
         new THREE.Color(0x3c5f8a),
@@ -1104,7 +1397,9 @@ function animate() {
         ssaoPass.maxDistance = 0.08 + state.aoIntensity * 0.004;
     }
 
-    controls.update();
+    if (!state.demoMode) {
+        controls.update();
+    }
 
     if (state.ambientOcclusion && composer && ssaoPass) {
         try {
