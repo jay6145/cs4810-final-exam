@@ -52,6 +52,8 @@ const flameMeshes = [];
 const wetMaterials = [];
 // flickering torches placed around the lake
 const torches = [];
+// scattered hanging lanterns across the map
+const lanterns = [];
 const clock = new THREE.Clock();
 
 // build a soft glowing dot texture for sparks
@@ -218,7 +220,9 @@ function init() {
 
     createTerrain();
     createLake();
+    createDirtPaths();
     createTorches();
+    createLanterns();
     createForest();
     createCampfire();
     createCampfireParticles();
@@ -455,6 +459,234 @@ function createTorches() {
             speed: 18 + Math.random() * 12,
         });
     }
+}
+
+// build a single hanging lantern with a glowing core and a soft point light
+function buildLanternMesh(index) {
+    const group = new THREE.Group();
+
+    const postHeight = 2.6;
+    const postMaterial = new THREE.MeshStandardMaterial({
+        color: 0x352213,
+        roughness: 0.95,
+        metalness: 0.05,
+    });
+    const ironMaterial = new THREE.MeshStandardMaterial({
+        color: 0x18120c,
+        roughness: 0.55,
+        metalness: 0.7,
+    });
+    const glowMaterial = new THREE.MeshStandardMaterial({
+        color: 0xffd07a,
+        emissive: 0xffaa44,
+        emissiveIntensity: 1.8,
+        roughness: 0.4,
+        metalness: 0.0,
+    });
+
+    const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.07, 0.09, postHeight, 8),
+        postMaterial,
+    );
+    post.position.y = postHeight / 2;
+    post.castShadow = true;
+    post.receiveShadow = true;
+    group.add(post);
+
+    // small horizontal arm so the lantern hangs to one side of the post
+    const arm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.04, 0.04, 0.55, 6),
+        ironMaterial,
+    );
+    arm.rotation.z = Math.PI / 2;
+    arm.position.set(0.27, postHeight - 0.05, 0);
+    arm.castShadow = true;
+    group.add(arm);
+
+    // lantern hanging below the arm
+    const lanternPivot = new THREE.Group();
+    lanternPivot.position.set(0.55, postHeight - 0.4, 0);
+    group.add(lanternPivot);
+
+    const cage = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.2, 0.5, 8, 1, true),
+        ironMaterial,
+    );
+    cage.castShadow = true;
+    lanternPivot.add(cage);
+
+    const cap = new THREE.Mesh(
+        new THREE.ConeGeometry(0.24, 0.18, 8),
+        ironMaterial,
+    );
+    cap.position.y = 0.34;
+    cap.castShadow = true;
+    lanternPivot.add(cap);
+
+    const base = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.22, 0.22, 0.05, 8),
+        ironMaterial,
+    );
+    base.position.y = -0.27;
+    lanternPivot.add(base);
+
+    const glow = new THREE.Mesh(
+        new THREE.SphereGeometry(0.13, 16, 8),
+        glowMaterial,
+    );
+    lanternPivot.add(glow);
+
+    const light = new THREE.PointLight(0xffd07a, 0, 22, 1.6);
+    lanternPivot.add(light);
+
+    return { group, light, glow, pivot: lanternPivot, swayPhase: index * 0.7 + Math.random() * Math.PI };
+}
+
+// scatter lanterns randomly across the map, avoiding lake and camp
+function createLanterns() {
+    const target = 16;
+    let attempts = 0;
+    while (lanterns.length < target && attempts < 300) {
+        attempts += 1;
+        const x = (Math.random() - 0.5) * 320;
+        const z = (Math.random() - 0.5) * 320;
+
+        // keep the very center clear so they dont overlap the campfire
+        const distFromCamp = Math.hypot(x, z);
+        const distFromLake = Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z);
+        if (distFromCamp < 22 || distFromLake < 50) continue;
+        // avoid placing two lanterns on top of each other
+        let tooClose = false;
+        for (const existing of lanterns) {
+            if (Math.hypot(x - existing.x, z - existing.z) < 22) {
+                tooClose = true;
+                break;
+            }
+        }
+        if (tooClose) continue;
+
+        const lantern = buildLanternMesh(lanterns.length);
+        lantern.group.position.set(x, 0, z);
+        lantern.group.rotation.y = Math.random() * Math.PI * 2;
+        scene.add(lantern.group);
+
+        lanterns.push({
+            x,
+            z,
+            light: lantern.light,
+            glow: lantern.glow,
+            pivot: lantern.pivot,
+            swayPhase: lantern.swayPhase,
+            phase: Math.random() * Math.PI * 2,
+            speed: 5 + Math.random() * 7,
+        });
+    }
+}
+
+// build a thin ribbon of dirt geometry along a curved spline of control points
+function createDirtPath(controlPoints, width = 2.6) {
+    const curve = new THREE.CatmullRomCurve3(controlPoints, false, 'catmullrom', 0.5);
+    const segments = Math.max(60, Math.floor(curve.getLength() * 1.4));
+    const samples = curve.getSpacedPoints(segments);
+
+    const positions = [];
+    const uvs = [];
+    const indices = [];
+
+    for (let i = 0; i < samples.length; i += 1) {
+        const p = samples[i];
+        let tangent;
+        if (i === 0) {
+            tangent = samples[1].clone().sub(p);
+        } else if (i === samples.length - 1) {
+            tangent = p.clone().sub(samples[i - 1]);
+        } else {
+            tangent = samples[i + 1].clone().sub(samples[i - 1]);
+        }
+        tangent.y = 0;
+        tangent.normalize();
+        // perpendicular in xz plane
+        const perp = new THREE.Vector3(-tangent.z, 0, tangent.x);
+
+        // taper the path at both ends and breathe its width slightly along the way
+        const tNorm = i / (samples.length - 1);
+        const taper = Math.min(
+            THREE.MathUtils.smoothstep(tNorm, 0, 0.06),
+            THREE.MathUtils.smoothstep(1 - tNorm, 0, 0.06),
+        );
+        const breathe = 0.9 + Math.sin(tNorm * 13.7) * 0.12 + Math.sin(tNorm * 5.1 + 1.3) * 0.08;
+        const w = (width / 2) * Math.max(0.35, taper) * breathe;
+
+        const left = p.clone().addScaledVector(perp, w);
+        const right = p.clone().addScaledVector(perp, -w);
+        positions.push(left.x, 0.03, left.z);
+        positions.push(right.x, 0.03, right.z);
+        uvs.push(0, tNorm * 6);
+        uvs.push(1, tNorm * 6);
+    }
+
+    for (let i = 0; i < samples.length - 1; i += 1) {
+        const a = i * 2;
+        const b = a + 1;
+        const c = a + 2;
+        const d = a + 3;
+        indices.push(a, b, c);
+        indices.push(b, d, c);
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+
+    const material = new THREE.MeshStandardMaterial({
+        color: 0x6b4a28,
+        roughness: 1.0,
+        metalness: 0.0,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+    });
+    wetMaterials.push({ material, dryRoughness: 1.0, wetRoughness: 0.55, dryMetalness: 0.0, wetMetalness: 0.18 });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.receiveShadow = true;
+    mesh.renderOrder = 0;
+    return mesh;
+}
+
+// lay down a few winding dirt paths between landmarks
+function createDirtPaths() {
+    // path from camp to the lake shore, curving softly through the grass
+    const campToLake = [
+        new THREE.Vector3(7, 0, 4),
+        new THREE.Vector3(18, 0, -4),
+        new THREE.Vector3(28, 0, -16),
+        new THREE.Vector3(38, 0, -28),
+        new THREE.Vector3(46, 0, -36),
+    ];
+    scene.add(createDirtPath(campToLake, 2.6));
+
+    // a smaller branch wandering off into the eastern forest
+    const branch = [
+        new THREE.Vector3(28, 0, -16),
+        new THREE.Vector3(48, 0, -8),
+        new THREE.Vector3(70, 0, 6),
+        new THREE.Vector3(95, 0, 22),
+        new THREE.Vector3(125, 0, 30),
+    ];
+    scene.add(createDirtPath(branch, 2.0));
+
+    // a rougher trail behind the camp leading into the western tree line
+    const westTrail = [
+        new THREE.Vector3(-4, 0, 8),
+        new THREE.Vector3(-22, 0, 18),
+        new THREE.Vector3(-46, 0, 24),
+        new THREE.Vector3(-72, 0, 38),
+        new THREE.Vector3(-100, 0, 56),
+    ];
+    scene.add(createDirtPath(westTrail, 2.2));
 }
 
 // make trees around the scene
@@ -1691,6 +1923,24 @@ function animateTorches(elapsedTime, daylight) {
     });
 }
 
+// animate scattered lanterns with a gentle sway and warm flicker
+function animateLanterns(elapsedTime, daylight) {
+    if (!lanterns.length) {
+        return;
+    }
+    const nightBoost = THREE.MathUtils.lerp(1.6, 0.25, daylight);
+    const mode = LIGHTING_MODES[state.lightingMode] || LIGHTING_MODES.Realistic;
+    lanterns.forEach(lantern => {
+        const t = elapsedTime * lantern.speed + lantern.phase;
+        const flicker = 0.85 + Math.sin(t) * 0.1 + Math.sin(t * 2.4) * 0.05;
+        lantern.light.intensity = flicker * nightBoost * mode.fireMult * 9;
+        // soft pendulum sway for the hanging lantern body
+        if (lantern.pivot) {
+            lantern.pivot.rotation.z = Math.sin(elapsedTime * 0.9 + lantern.swayPhase) * 0.06;
+        }
+    });
+}
+
 // animate campfire particles
 function animateCampfireParticles(delta, daylight) {
     if (!sparkParticles || !smokeParticles) {
@@ -1862,6 +2112,7 @@ function animate() {
     animateCampfire(elapsed, daylight);
     animateCampfireParticles(delta, daylight);
     animateTorches(elapsed, daylight);
+    animateLanterns(elapsed, daylight);
     animateWeather(delta);
     animateFireflies(elapsed, daylight);
     animateBirds(elapsed, daylight);
