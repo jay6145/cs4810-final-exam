@@ -36,6 +36,7 @@ let rain;
 let sparkParticles;
 let smokeParticles;
 let fireflies;
+let tungSahur;
 const birds = [];
 
 let sunLight;
@@ -121,6 +122,7 @@ const state = {
     lightingMode: 'Realistic',
     firefliesEnabled: true,
     birdsEnabled: true,
+    tungSahurEnabled: true,
     demoMode: false,
     demoSpeed: 1.0,
 };
@@ -219,6 +221,7 @@ function init() {
     createRain();
     createFireflies();
     createBirds();
+    createTungSahur();
     createLights();
     setupPostProcessing();
     setupGUI();
@@ -912,6 +915,299 @@ function createBirds() {
     }
 }
 
+// build the tung tung tung sahur character: a flat wooden cricket-bat creature
+// with a big toothy grin, expressive eyes, skinny limbs, and a held bat
+function createTungSahur() {
+    const group = new THREE.Group();
+
+    const bodyHeight = 4.0;
+    const bodyBottomY = 1.55;
+    const halfWidth = 0.95;
+
+    const bodyMat = new THREE.MeshStandardMaterial({
+        color: 0xb87a3f,
+        roughness: 0.78,
+        metalness: 0.05,
+    });
+    wetMaterials.push({ material: bodyMat, dryRoughness: 0.78, wetRoughness: 0.4, dryMetalness: 0.05, wetMetalness: 0.2 });
+
+    const limbMat = new THREE.MeshStandardMaterial({
+        color: 0xa46a3c,
+        roughness: 0.85,
+        metalness: 0.04,
+    });
+    wetMaterials.push({ material: limbMat, dryRoughness: 0.85, wetRoughness: 0.45, dryMetalness: 0.04, wetMetalness: 0.2 });
+
+    // flat paddle/cricket-bat body via extruded shape
+    const bodyShape = new THREE.Shape();
+    bodyShape.moveTo(-halfWidth * 0.95, 0);
+    bodyShape.lineTo(halfWidth * 0.95, 0);
+    bodyShape.bezierCurveTo(
+        halfWidth, bodyHeight * 0.06,
+        halfWidth, bodyHeight * 0.7,
+        halfWidth * 0.93, bodyHeight * 0.86
+    );
+    bodyShape.quadraticCurveTo(halfWidth * 0.6, bodyHeight * 1.04, 0, bodyHeight * 1.06);
+    bodyShape.quadraticCurveTo(-halfWidth * 0.6, bodyHeight * 1.04, -halfWidth * 0.93, bodyHeight * 0.86);
+    bodyShape.bezierCurveTo(
+        -halfWidth, bodyHeight * 0.7,
+        -halfWidth, bodyHeight * 0.06,
+        -halfWidth * 0.95, 0
+    );
+
+    const extrudeSettings = {
+        depth: 0.55,
+        bevelEnabled: true,
+        bevelThickness: 0.18,
+        bevelSize: 0.16,
+        bevelSegments: 4,
+        curveSegments: 24,
+    };
+    const bodyGeo = new THREE.ExtrudeGeometry(bodyShape, extrudeSettings);
+    bodyGeo.translate(0, 0, -extrudeSettings.depth / 2);
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = bodyBottomY;
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+
+    // front of body (with bevel) sticks out to about z = depth/2 + bevelThickness
+    const faceZ = extrudeSettings.depth / 2 + extrudeSettings.bevelThickness;
+
+    // eye builder: white sclera, brown iris, black pupil, bright highlight
+    function makeEye() {
+        const eye = new THREE.Group();
+        const sclera = new THREE.Mesh(
+            new THREE.SphereGeometry(0.32, 22, 22),
+            new THREE.MeshStandardMaterial({ color: 0xfafaf2, roughness: 0.32 })
+        );
+        eye.add(sclera);
+        const iris = new THREE.Mesh(
+            new THREE.SphereGeometry(0.18, 18, 18),
+            new THREE.MeshBasicMaterial({ color: 0x6b3a18 })
+        );
+        iris.position.z = 0.2;
+        eye.add(iris);
+        const pupil = new THREE.Mesh(
+            new THREE.SphereGeometry(0.1, 16, 16),
+            new THREE.MeshBasicMaterial({ color: 0x000000 })
+        );
+        pupil.position.z = 0.28;
+        eye.add(pupil);
+        const highlight = new THREE.Mesh(
+            new THREE.SphereGeometry(0.045, 12, 12),
+            new THREE.MeshBasicMaterial({ color: 0xffffff })
+        );
+        highlight.position.set(-0.06, 0.07, 0.305);
+        eye.add(highlight);
+        return eye;
+    }
+
+    const eyeY = bodyBottomY + bodyHeight * 0.78;
+    const leftEye = makeEye();
+    leftEye.position.set(-0.42, eyeY, faceZ + 0.05);
+    group.add(leftEye);
+    const rightEye = makeEye();
+    rightEye.position.set(0.42, eyeY, faceZ + 0.05);
+    group.add(rightEye);
+
+    // thin raised brows above the eyes
+    const browGeo = new THREE.BoxGeometry(0.36, 0.05, 0.06);
+    const browMat = new THREE.MeshBasicMaterial({ color: 0x1a0c04 });
+    const leftBrow = new THREE.Mesh(browGeo, browMat);
+    leftBrow.position.set(-0.42, eyeY + 0.4, faceZ + 0.18);
+    leftBrow.rotation.z = 0.18;
+    group.add(leftBrow);
+    const rightBrow = new THREE.Mesh(browGeo, browMat);
+    rightBrow.position.set(0.42, eyeY + 0.4, faceZ + 0.18);
+    rightBrow.rotation.z = -0.18;
+    group.add(rightBrow);
+
+    // wide curved smile shape
+    const mouthY = bodyBottomY + bodyHeight * 0.5;
+    const mw = 0.6;
+    const mh = 0.32;
+    const mouthShape = new THREE.Shape();
+    mouthShape.moveTo(-mw, 0.04);
+    mouthShape.quadraticCurveTo(-mw * 0.5, 0.16, 0, 0.14);
+    mouthShape.quadraticCurveTo(mw * 0.5, 0.16, mw, 0.04);
+    mouthShape.quadraticCurveTo(mw * 0.55, -mh, 0, -mh * 1.1);
+    mouthShape.quadraticCurveTo(-mw * 0.55, -mh, -mw, 0.04);
+    const mouthGeo = new THREE.ShapeGeometry(mouthShape, 24);
+    const mouth = new THREE.Mesh(
+        mouthGeo,
+        new THREE.MeshBasicMaterial({ color: 0x180a05, side: THREE.DoubleSide })
+    );
+    mouth.position.set(0, mouthY, faceZ + 0.12);
+    group.add(mouth);
+
+    // white teeth strip across the upper part of the smile
+    const teethStrip = new THREE.Mesh(
+        new THREE.BoxGeometry(mw * 1.7, 0.11, 0.04),
+        new THREE.MeshBasicMaterial({ color: 0xf2e8d3 })
+    );
+    teethStrip.position.set(0, mouthY + 0.08, faceZ + 0.16);
+    group.add(teethStrip);
+
+    // dark dividers between individual teeth
+    for (let i = -2; i <= 2; i += 1) {
+        const divider = new THREE.Mesh(
+            new THREE.BoxGeometry(0.018, 0.11, 0.05),
+            new THREE.MeshBasicMaterial({ color: 0x180a05 })
+        );
+        divider.position.set(i * 0.19, mouthY + 0.08, faceZ + 0.18);
+        group.add(divider);
+    }
+
+    // shoulder pivots for swinging arms
+    const shoulderY = bodyBottomY + bodyHeight * 0.55;
+    const armGeo = new THREE.CylinderGeometry(0.085, 0.06, 1.5, 12);
+    armGeo.translate(0, -0.75, 0);
+
+    const leftArm = new THREE.Mesh(armGeo, limbMat);
+    leftArm.position.set(-(halfWidth + 0.05), shoulderY, 0);
+    leftArm.rotation.z = 0.18;
+    leftArm.castShadow = true;
+    group.add(leftArm);
+
+    const rightArm = new THREE.Mesh(armGeo, limbMat);
+    rightArm.position.set(halfWidth + 0.05, shoulderY, 0);
+    rightArm.rotation.z = -0.18;
+    rightArm.castShadow = true;
+    group.add(rightArm);
+
+    // simple round hands at the end of each arm
+    const handGeo = new THREE.SphereGeometry(0.11, 12, 12);
+    const leftHand = new THREE.Mesh(handGeo, limbMat);
+    leftHand.position.y = -1.5;
+    leftHand.castShadow = true;
+    leftArm.add(leftHand);
+    const rightHand = new THREE.Mesh(handGeo, limbMat);
+    rightHand.position.y = -1.5;
+    rightHand.castShadow = true;
+    rightArm.add(rightHand);
+
+    // hand-held baseball bat: thin handle and knob at the wrist, tapering down into a thick rounded barrel
+    const heldBatMat = new THREE.MeshStandardMaterial({
+        color: 0xc8924d,
+        roughness: 0.42,
+        metalness: 0.08,
+    });
+    wetMaterials.push({ material: heldBatMat, dryRoughness: 0.42, wetRoughness: 0.18, dryMetalness: 0.08, wetMetalness: 0.3 });
+
+    // profile from barrel tip (low y) up through the taper to the handle and knob (high y)
+    const heldBatProfile = [
+        new THREE.Vector2(0.001, 0.00),
+        new THREE.Vector2(0.100, 0.04),
+        new THREE.Vector2(0.135, 0.10),
+        new THREE.Vector2(0.150, 0.22),
+        new THREE.Vector2(0.155, 0.42),
+        new THREE.Vector2(0.155, 0.62),
+        new THREE.Vector2(0.140, 0.76),
+        new THREE.Vector2(0.115, 0.88),
+        new THREE.Vector2(0.085, 1.00),
+        new THREE.Vector2(0.062, 1.12),
+        new THREE.Vector2(0.052, 1.28),
+        new THREE.Vector2(0.050, 1.52),
+        new THREE.Vector2(0.075, 1.62),
+        new THREE.Vector2(0.085, 1.68),
+        new THREE.Vector2(0.050, 1.74),
+        new THREE.Vector2(0.001, 1.76),
+    ];
+    const heldBatGeo = new THREE.LatheGeometry(heldBatProfile, 24);
+    // shift so the gripping point on the handle is at the geometry origin
+    heldBatGeo.translate(0, -1.56, 0);
+
+    const heldBat = new THREE.Mesh(heldBatGeo, heldBatMat);
+    heldBat.position.set(0, 0, 0.04);
+    heldBat.rotation.x = -0.45;
+    heldBat.castShadow = true;
+    heldBat.receiveShadow = true;
+    rightHand.add(heldBat);
+
+    // dark wrapped grip on the handle
+    const grip = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.055, 0.055, 0.32, 18),
+        new THREE.MeshStandardMaterial({ color: 0x1d100a, roughness: 0.95 })
+    );
+    grip.position.set(0, -0.2, 0);
+    grip.castShadow = true;
+    heldBat.add(grip);
+
+    // skinny tapered legs hanging from the body bottom
+    const legGeo = new THREE.CylinderGeometry(0.11, 0.08, 1.55, 12);
+    legGeo.translate(0, -0.78, 0);
+
+    const leftLeg = new THREE.Mesh(legGeo, limbMat);
+    leftLeg.position.set(-0.38, bodyBottomY + 0.05, 0);
+    leftLeg.castShadow = true;
+    group.add(leftLeg);
+
+    const rightLeg = new THREE.Mesh(legGeo, limbMat);
+    rightLeg.position.set(0.38, bodyBottomY + 0.05, 0);
+    rightLeg.castShadow = true;
+    group.add(rightLeg);
+
+    // rounded oval feet
+    const footGeo = new THREE.SphereGeometry(0.18, 16, 12);
+    footGeo.scale(1.35, 0.6, 1.95);
+    const footMat = new THREE.MeshStandardMaterial({ color: 0x6b4523, roughness: 0.95 });
+    wetMaterials.push({ material: footMat, dryRoughness: 0.95, wetRoughness: 0.45, dryMetalness: 0.0, wetMetalness: 0.18 });
+
+    const leftFoot = new THREE.Mesh(footGeo, footMat);
+    leftFoot.position.set(0, -1.5, 0.18);
+    leftFoot.castShadow = true;
+    leftFoot.receiveShadow = true;
+    leftLeg.add(leftFoot);
+    const rightFoot = new THREE.Mesh(footGeo, footMat);
+    rightFoot.position.set(0, -1.5, 0.18);
+    rightFoot.castShadow = true;
+    rightFoot.receiveShadow = true;
+    rightLeg.add(rightFoot);
+
+    group.scale.setScalar(0.95);
+    group.userData = { leftArm, rightArm, leftLeg, rightLeg };
+
+    tungSahur = group;
+    scene.add(group);
+}
+
+// walk tung tung tung sahur in a wide circle around the campfire
+function animateTungSahur(elapsed) {
+    if (!tungSahur) {
+        return;
+    }
+    tungSahur.visible = state.tungSahurEnabled;
+    if (!state.tungSahurEnabled) {
+        return;
+    }
+
+    // circular path that stays inside the open camp area, outside the fire pit
+    const radius = 14;
+    const angularSpeed = 0.35;
+    const angle = elapsed * angularSpeed;
+
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    // bob up and down with each step (always positive so feet stay above ground)
+    const stepBob = Math.abs(Math.sin(elapsed * 4.2)) * 0.18;
+
+    tungSahur.position.set(x, stepBob, z);
+    // face the direction of motion: tangent to the circle, +Z is the model's front
+    tungSahur.rotation.y = -angle;
+
+    // walking animation: alternating limbs
+    const swing = Math.sin(elapsed * 7.5) * 0.7;
+    const { leftArm, rightArm, leftLeg, rightLeg } = tungSahur.userData;
+    leftArm.rotation.x = swing;
+    rightArm.rotation.x = -swing;
+    leftLeg.rotation.x = -swing * 0.85;
+    rightLeg.rotation.x = swing * 0.85;
+
+    // tiny side-to-side waddle
+    tungSahur.rotation.z = Math.sin(elapsed * 7.5) * 0.05;
+}
+
 // apply tone mapping + multipliers from a preset
 function applyLightingMode() {
     const mode = LIGHTING_MODES[state.lightingMode];
@@ -1077,6 +1373,7 @@ function setupGUI() {
     const wildlifeFolder = gui.addFolder('Wildlife');
     wildlifeFolder.add(state, 'firefliesEnabled').name('Fireflies (night)');
     wildlifeFolder.add(state, 'birdsEnabled').name('Birds (day)');
+    wildlifeFolder.add(state, 'tungSahurEnabled').name('Tung Sahur');
     wildlifeFolder.open();
 
     const demoFolder = gui.addFolder('Cinematic Demo');
@@ -1380,6 +1677,7 @@ function animate() {
     animateWeather(delta);
     animateFireflies(elapsed, daylight);
     animateBirds(elapsed, daylight);
+    animateTungSahur(elapsed);
     updateCinematicCamera(elapsed);
 
     const waterTint = new THREE.Color().lerpColors(
