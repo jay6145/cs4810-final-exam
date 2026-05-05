@@ -7,6 +7,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+// import campfire shaders
 import {
     flameVertexShader,
     flameFragmentShader,
@@ -15,10 +16,12 @@ import {
     smokeVertexShader,
     smokeFragmentShader,
 } from '../shaders/campfireShaders.js';
+// import firefly shaders
 import {
     fireflyVertexShader,
     fireflyFragmentShader,
 } from '../shaders/wildlifeShaders.js';
+// import shaders for aurora 
 import {
     auroraVertexShader,
     auroraFragmentShader,
@@ -35,6 +38,7 @@ let gui;
 
 let sunMesh;
 let moonMesh;
+// storing the variables for objects in our scene
 let stars;
 let lake;
 let rain;
@@ -43,7 +47,7 @@ let smokeParticles;
 let fireflies;
 let tungSahur;
 const birds = [];
-
+// storing the variables for different kinds of lighting in our scene
 let sunLight;
 let campfireLight;
 let campfireSpotLight;
@@ -127,6 +131,7 @@ function makeSmokeTexture() {
 
 // scene settings
 const state = {
+    // stores the default values of the settings in the sidebar that we can reset to
     animateCycle: true,
     cycleSpeed: 0.02,
     timeOfDay: 0.35,
@@ -156,6 +161,7 @@ const state = {
 
 // lighting style presets
 const LIGHTING_MODES = {
+    // handles realistic lighting
     Realistic: {
         toneMapping: THREE.ACESFilmicToneMapping,
         exposure: 1.05,
@@ -164,16 +170,20 @@ const LIGHTING_MODES = {
         sunMult: 1.0,
         fireMult: 1.0,
     },
+    // handles cinematic lighting
     Cinematic: {
         toneMapping: THREE.CineonToneMapping,
+        // slightly lower exposure compared to realistic
         exposure: 0.78,
         ambientMult: 0.55,
         hemisphereMult: 0.65,
         sunMult: 1.4,
         fireMult: 1.5,
     },
+    // handles stylized lighting 
     Stylized: {
         toneMapping: THREE.LinearToneMapping,
+        // highest exposure for a bright image 
         exposure: 1.4,
         ambientMult: 1.5,
         hemisphereMult: 1.4,
@@ -184,6 +194,7 @@ const LIGHTING_MODES = {
 
 // cinematic camera flythrough waypoints
 const CAMERA_PATH_POSITIONS = [
+    // prestore some set positions that the camera will go to along the path
     new THREE.Vector3(0, 14, 28),
     new THREE.Vector3(35, 18, 25),
     new THREE.Vector3(70, 24, 0),
@@ -195,7 +206,7 @@ const CAMERA_PATH_POSITIONS = [
     new THREE.Vector3(-50, 22, 60),
     new THREE.Vector3(0, 14, 28),
 ];
-
+// prestore some set targets that the camera will pan towards along the path
 const CAMERA_PATH_TARGETS = [
     new THREE.Vector3(0, 4, 0),
     new THREE.Vector3(0, 4, 0),
@@ -208,30 +219,31 @@ const CAMERA_PATH_TARGETS = [
     new THREE.Vector3(0, 4, 0),
     new THREE.Vector3(0, 4, 0),
 ];
-
+// camera and target curves for smooth interpolation between waypoints
 const cameraCurve = new THREE.CatmullRomCurve3(CAMERA_PATH_POSITIONS, true, 'catmullrom', 0.4);
 const targetCurve = new THREE.CatmullRomCurve3(CAMERA_PATH_TARGETS, true, 'catmullrom', 0.4);
 
 // start the scene
 function init() {
     scene = new THREE.Scene();
+    // sets background color
     scene.background = new THREE.Color(0x89c7ff);
     scene.fog = new THREE.Fog(0x89c7ff, 200, 600);
-
+    // sets up camera
     camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.set(0, 42, 145);
     camera.lookAt(0, 20, 0);
-
+    // sets up renderer 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    // cap at 1.5 instead of 2 -- huge fragment-shader cost saving on retina screens with very subtle visual loss
+    
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.body.appendChild(renderer.domElement);
-
+    // set up orbit controls 
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.minDistance = 35;
@@ -239,13 +251,13 @@ function init() {
     controls.maxPolarAngle = Math.PI * 0.48;
 
     RectAreaLightUniformsLib.init();
-
+    // intialize all the objects in our scene 
     createTerrain();
     createMountains();
     createLake();
     createDock();
     createCanoe();
-    createDirtPaths();
+
     createSignpost();
     createForestFloor();
     createTorches();
@@ -271,29 +283,32 @@ function init() {
     applyShadowSettings();
     applyLightingMode();
     updateDayNightLighting();
-
+    // allow the scene to respond to window resizes
     window.addEventListener('resize', onWindowResize);
-
+    // call the animate function so all objects inside scene animate 
     animate();
 }
 
 // make the ground and camp area
 function createTerrain() {
+    // creates the basic ground of the scene using mesh standard material
     const groundMaterial = new THREE.MeshStandardMaterial({
         color: 0x4c7a3c,
         roughness: 0.98,
         metalness: 0.02,
     });
+    // adds wet material properties to the ground 
     wetMaterials.push({ material: groundMaterial, dryRoughness: 0.98, wetRoughness: 0.42, dryMetalness: 0.02, wetMetalness: 0.25 });
-    // circular ground that reaches past the outermost mountain ring so the meadow blends seamlessly into the horizon
+    // circular ground that reaches past the outermost mountain ring so the meadow blends into the horizon
     const ground = new THREE.Mesh(
         new THREE.CircleGeometry(420, 96),
         groundMaterial
     );
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
+    // adds ground to scene 
     scene.add(ground);
-
+    // makes the material for the campfire circle on the ground 
     const campPatchMaterial = new THREE.MeshStandardMaterial({
         color: 0x5b4a35,
         roughness: 1.0,
@@ -303,6 +318,7 @@ function createTerrain() {
         polygonOffsetUnits: -1,
     });
     wetMaterials.push({ material: campPatchMaterial, dryRoughness: 1.0, wetRoughness: 0.5, dryMetalness: 0.0, wetMetalness: 0.2 });
+    // creates the campfire circle on the ground 
     const campPatch = new THREE.Mesh(
         new THREE.CircleGeometry(20, 48),
         campPatchMaterial
@@ -310,12 +326,15 @@ function createTerrain() {
     campPatch.rotation.x = -Math.PI / 2;
     campPatch.position.y = 0.02;
     campPatch.receiveShadow = true;
+    // adds campfire ground patch to the scene 
     scene.add(campPatch);
 }
 
 // generate organic lake outline points using layered sine waves
 function createLakeOutline(segments, baseRadius, variation) {
+    // prestoring a set of points for the lake outline 
     const points = [];
+    // layers multiple sine waves to create a more natural and less straight lake outline  
     for (let i = 0; i < segments; i += 1) {
         const angle = (i / segments) * Math.PI * 2;
         const r = baseRadius
@@ -327,26 +346,28 @@ function createLakeOutline(segments, baseRadius, variation) {
     return points;
 }
 
-// fixed lake center used by createLake and createLights
+// fixed lake center used by createLake
 const LAKE_CENTER = new THREE.Vector3(78, 0.08, -58);
 
-// how far the sun and moon orbit, kept far in the sky
+// how far the sun and moon orbit from the scene 
 const SKY_DISTANCE = 480;
-// vertical squash so the arc feels like a celestial dome
+// y ratio to keep the sun and moon in the upper portion of the sky 
 const SKY_Y_RATIO = 0.85;
-// where the directional sun light sits along the sun direction
+// how far the directional sun light sits along the sun direction
 const SUN_LIGHT_DISTANCE = 180;
 
 // make the lake and shoreline
 function createLake() {
+    // loads the outline points for the lake 
     const outlinePoints = createLakeOutline(72, 34, 4.5);
+    // creates the shape using the points 
     const lakeShape = new THREE.Shape(outlinePoints);
+    // creates the geometry for the lake 
     const lakeGeometry = new THREE.ShapeGeometry(lakeShape, 24);
-
+    // uses reflector to make the surface of the lake reflective 
     lake = new Reflector(lakeGeometry, {
         clipBias: 0.003,
         // half-resolution reflection cuts the reflector cost roughly in quarter
-        // the slight blur of the reflection is barely noticeable on water
         textureWidth: Math.floor(window.innerWidth * 0.5),
         textureHeight: Math.floor(window.innerHeight * 0.5),
         color: 0x7cc4ff,
@@ -354,14 +375,16 @@ function createLake() {
     });
     lake.rotation.x = -Math.PI / 2;
     lake.position.copy(LAKE_CENTER);
-    // bias forward so it always wins z-fight with the ground
+
     lake.material.polygonOffset = true;
     lake.material.polygonOffsetFactor = -2;
     lake.material.polygonOffsetUnits = -2;
+    // adds the lake to scene 
     scene.add(lake);
 
-    // shoreline that hugs the irregular lake outline
+    // specifies the shore width 
     const shoreWidth = 6;
+    // sets the points the shore geometry will be build on using the lake outline points 
     const shoreOuterPoints = outlinePoints.map(p => {
         const angle = Math.atan2(p.y, p.x);
         const len = p.length();
@@ -370,11 +393,12 @@ function createLake() {
             Math.sin(angle) * (len + shoreWidth)
         );
     });
+    // creates the shape of the shore 
     const shoreShape = new THREE.Shape(shoreOuterPoints);
-    // hole points must wind opposite to the outer shape
-    shoreShape.holes.push(new THREE.Path(outlinePoints.slice().reverse()));
-    const shoreGeometry = new THREE.ShapeGeometry(shoreShape, 24);
 
+    // creates the shore geometry 
+    const shoreGeometry = new THREE.ShapeGeometry(shoreShape, 24);
+    // creates the shore material and adds wet material properties to it
     const shoreMaterial = new THREE.MeshStandardMaterial({
         color: 0x6c5a3f,
         roughness: 0.95,
@@ -384,40 +408,47 @@ function createLake() {
         polygonOffsetUnits: -1,
     });
     wetMaterials.push({ material: shoreMaterial, dryRoughness: 0.95, wetRoughness: 0.35, dryMetalness: 0.0, wetMetalness: 0.25 });
-
+    // creates the shore ring using shore geometry and shore material 
     const shoreRing = new THREE.Mesh(shoreGeometry, shoreMaterial);
     shoreRing.rotation.x = -Math.PI / 2;
     shoreRing.position.copy(LAKE_CENTER);
     shoreRing.position.y = 0.05;
     shoreRing.receiveShadow = true;
+    // adds the shore ring to the scene 
     scene.add(shoreRing);
 }
 
 // build wooden torches with flickering shader flames around the lake
 function createTorches() {
+    // specifies how many torches to place around lake
     const torchCount = 8;
+    // radius from lake center to place torches in a ring
     const ringRadius = 46;
+    // prestores the dimensions for the torch posts 
     const postHeight = 3.6;
     const postRadius = 0.18;
-
+    // creates the material for the post 
     const postMaterial = new THREE.MeshStandardMaterial({
         color: 0x3a2412,
         roughness: 0.95,
         metalness: 0.05,
     });
+    // creates the material for the wrap on the post 
     const wrapMaterial = new THREE.MeshStandardMaterial({
         color: 0x1a1108,
         roughness: 1.0,
         metalness: 0.0,
     });
+    // creates the material for the ember on top of the post 
     const emberMaterial = new THREE.MeshStandardMaterial({
         color: 0xff6620,
+        // allows the material to glow even without a direct light source using emissive
         emissive: 0xff5510,
         emissiveIntensity: 1.4,
         roughness: 0.6,
         metalness: 0.0,
     });
-
+    // loops to create a set of torches around the radius of the lake like a ring 
     for (let i = 0; i < torchCount; i += 1) {
         const angle = (i / torchCount) * Math.PI * 2;
         const x = LAKE_CENTER.x + Math.cos(angle) * ringRadius;
@@ -425,17 +456,20 @@ function createTorches() {
 
         const torchGroup = new THREE.Group();
         torchGroup.position.set(x, 0, z);
-        // small random yaw and tilt so they don't look mechanical
+        // sets a slight rotation on the y and z axis so they aren't perfectly straight 
         torchGroup.rotation.y = Math.random() * Math.PI * 2;
         torchGroup.rotation.z = (Math.random() - 0.5) * 0.06;
-
+        // creates the post using geometry and material 
         const post = new THREE.Mesh(
             new THREE.CylinderGeometry(postRadius * 0.85, postRadius, postHeight, 8),
             postMaterial,
         );
+        // sets the position to be half the post height 
         post.position.y = postHeight / 2;
+        // allows the post to be able to cast and receive shadows 
         post.castShadow = true;
         post.receiveShadow = true;
+        // adds the post to the torch group
         torchGroup.add(post);
 
         // wrapped/charred top of the post
@@ -443,20 +477,24 @@ function createTorches() {
             new THREE.CylinderGeometry(postRadius * 1.4, postRadius * 1.4, 0.55, 10),
             wrapMaterial,
         );
+        // sets position of wrap to be at the top of the post with slight offset
         wrap.position.y = postHeight - 0.1;
         wrap.castShadow = true;
+        // adds wrap to the torch group 
         torchGroup.add(wrap);
 
-        // glowing ember bowl right under the flame
+        // creates glowing ember bowl
         const ember = new THREE.Mesh(
             new THREE.SphereGeometry(0.28, 12, 8),
             emberMaterial,
         );
+        // asets the ember to be right above the wrap 
         ember.position.y = postHeight + 0.15;
         torchGroup.add(ember);
 
-        // shader flame, single cone re-using the campfire flame shader
+        // creates the material used for the torch flame 
         const flameMaterial = new THREE.ShaderMaterial({
+            // adds uniforms to control shader 
             uniforms: {
                 uTime: { value: 0 },
                 uIntensity: { value: 1.15 },
@@ -472,22 +510,25 @@ function createTorches() {
             blending: THREE.AdditiveBlending,
             side: THREE.DoubleSide,
         });
+        // creates the flame using cone geometry 
         const flame = new THREE.Mesh(
             new THREE.ConeGeometry(0.42, 1.4, 16, 8, true),
             flameMaterial,
         );
+        // sets position of flame to be above the post 
         flame.position.y = postHeight + 0.85;
         flame.renderOrder = 2;
-        // animateCampfire already drives uTime on every flame in this list
         flameMeshes.push(flame);
+        // adds the flame to the torch group 
         torchGroup.add(flame);
 
         // warm point light at the flame, no shadows for performance
         const light = new THREE.PointLight(0xffa050, 0, 26, 1.7);
         light.position.y = postHeight + 0.85;
         torchGroup.add(light);
-
+        // adds the entire torch group to the scene 
         scene.add(torchGroup);
+        // pushes the torch into torches array 
         torches.push({
             group: torchGroup,
             light,
@@ -500,18 +541,21 @@ function createTorches() {
 // build a single hanging lantern with a glowing core and a soft point light
 function buildLanternMesh(index) {
     const group = new THREE.Group();
-
+    // sets the post height for the lantern 
     const postHeight = 2.6;
+    // creates the material for the post of the lantern
     const postMaterial = new THREE.MeshStandardMaterial({
         color: 0x352213,
         roughness: 0.95,
         metalness: 0.05,
     });
+    // creates the material for the iron cage of the lantern
     const ironMaterial = new THREE.MeshStandardMaterial({
         color: 0x18120c,
         roughness: 0.55,
         metalness: 0.7,
     });
+    // creates the material for the glowing core of the lantern
     const glowMaterial = new THREE.MeshStandardMaterial({
         color: 0xffd07a,
         emissive: 0xffaa44,
@@ -519,7 +563,7 @@ function buildLanternMesh(index) {
         roughness: 0.4,
         metalness: 0.0,
     });
-
+    // creates the vertical post of the lantern 
     const post = new THREE.Mesh(
         new THREE.CylinderGeometry(0.07, 0.09, postHeight, 8),
         postMaterial,
@@ -527,6 +571,7 @@ function buildLanternMesh(index) {
     post.position.y = postHeight / 2;
     post.castShadow = true;
     post.receiveShadow = true;
+    // adds the post to the lantern group
     group.add(post);
 
     // small horizontal arm so the lantern hangs to one side of the post
@@ -537,62 +582,70 @@ function buildLanternMesh(index) {
     arm.rotation.z = Math.PI / 2;
     arm.position.set(0.27, postHeight - 0.05, 0);
     arm.castShadow = true;
+    // adds the lantern arm to the lantern group
     group.add(arm);
 
-    // lantern hanging below the arm
+    // pivot to allow the lantern to hang below the arm
     const lanternPivot = new THREE.Group();
     lanternPivot.position.set(0.55, postHeight - 0.4, 0);
+    // adds lantern pivot to the lantern group 
     group.add(lanternPivot);
-
+    // creates the cage for the lantern 
     const cage = new THREE.Mesh(
         new THREE.CylinderGeometry(0.18, 0.2, 0.5, 8, 1, true),
         ironMaterial,
     );
     cage.castShadow = true;
+    // adds the cage to the lantern pivot   
     lanternPivot.add(cage);
-
+    // creates the top cap for the lantern using the iron material
     const cap = new THREE.Mesh(
         new THREE.ConeGeometry(0.24, 0.18, 8),
         ironMaterial,
     );
     cap.position.y = 0.34;
     cap.castShadow = true;
+    // adds the cap to the pivot 
     lanternPivot.add(cap);
-
+    // creates the bottom base of the lantern using iron material
     const base = new THREE.Mesh(
         new THREE.CylinderGeometry(0.22, 0.22, 0.05, 8),
         ironMaterial,
     );
     base.position.y = -0.27;
+    // adds the base to the lantern pivot
     lanternPivot.add(base);
-
+    // creates the glowing core of the lantern 
     const glow = new THREE.Mesh(
         new THREE.SphereGeometry(0.13, 16, 8),
         glowMaterial,
     );
+    // adds the glow to the pivot 
     lanternPivot.add(glow);
-
+    // creates the light for the lantern using point lighting 
     const light = new THREE.PointLight(0xffd07a, 0, 22, 1.6);
+    // adds the light to the pivot 
     lanternPivot.add(light);
-
     return { group, light, glow, pivot: lanternPivot, swayPhase: index * 0.7 + Math.random() * Math.PI };
 }
 
-// scatter lanterns randomly across the map, avoiding lake and camp
+// creates multiple lanterns a
 function createLanterns() {
     const target = 10;
     let attempts = 0;
+    // loops through to place lanterns at random points across the map 
     while (lanterns.length < target && attempts < 300) {
         attempts += 1;
         const x = (Math.random() - 0.5) * 320;
         const z = (Math.random() - 0.5) * 320;
 
-        // keep the very center clear so they dont overlap the campfire
+        // keep the very center clear so they don't overlap the campfire
         const distFromCamp = Math.hypot(x, z);
         const distFromLake = Math.hypot(x - LAKE_CENTER.x, z - LAKE_CENTER.z);
         if (distFromCamp < 22 || distFromLake < 50) continue;
         // avoid placing two lanterns on top of each other
         let tooClose = false;
+        // if lanterns are too close, break out of loop
         for (const existing of lanterns) {
             if (Math.hypot(x - existing.x, z - existing.z) < 22) {
                 tooClose = true;
@@ -600,10 +653,11 @@ function createLanterns() {
             }
         }
         if (tooClose) continue;
-
+        // creates the lantern
         const lantern = buildLanternMesh(lanterns.length);
         lantern.group.position.set(x, 0, z);
         lantern.group.rotation.y = Math.random() * Math.PI * 2;
+        // adds the lantern group to the scene 
         scene.add(lantern.group);
 
         lanterns.push({
@@ -619,120 +673,17 @@ function createLanterns() {
     }
 }
 
-// build a thin ribbon of dirt geometry along a curved spline of control points
-function createDirtPath(controlPoints, width = 2.6) {
-    const curve = new THREE.CatmullRomCurve3(controlPoints, false, 'catmullrom', 0.5);
-    const segments = Math.max(60, Math.floor(curve.getLength() * 1.4));
-    const samples = curve.getSpacedPoints(segments);
-
-    const positions = [];
-    const uvs = [];
-    const indices = [];
-
-    for (let i = 0; i < samples.length; i += 1) {
-        const p = samples[i];
-        let tangent;
-        if (i === 0) {
-            tangent = samples[1].clone().sub(p);
-        } else if (i === samples.length - 1) {
-            tangent = p.clone().sub(samples[i - 1]);
-        } else {
-            tangent = samples[i + 1].clone().sub(samples[i - 1]);
-        }
-        tangent.y = 0;
-        tangent.normalize();
-        // perpendicular in xz plane
-        const perp = new THREE.Vector3(-tangent.z, 0, tangent.x);
-
-        // taper the path at both ends and breathe its width slightly along the way
-        const tNorm = i / (samples.length - 1);
-        const taper = Math.min(
-            THREE.MathUtils.smoothstep(tNorm, 0, 0.06),
-            THREE.MathUtils.smoothstep(1 - tNorm, 0, 0.06),
-        );
-        const breathe = 0.9 + Math.sin(tNorm * 13.7) * 0.12 + Math.sin(tNorm * 5.1 + 1.3) * 0.08;
-        const w = (width / 2) * Math.max(0.35, taper) * breathe;
-
-        const left = p.clone().addScaledVector(perp, w);
-        const right = p.clone().addScaledVector(perp, -w);
-        positions.push(left.x, 0.03, left.z);
-        positions.push(right.x, 0.03, right.z);
-        uvs.push(0, tNorm * 6);
-        uvs.push(1, tNorm * 6);
-    }
-
-    for (let i = 0; i < samples.length - 1; i += 1) {
-        const a = i * 2;
-        const b = a + 1;
-        const c = a + 2;
-        const d = a + 3;
-        indices.push(a, b, c);
-        indices.push(b, d, c);
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    geometry.setIndex(indices);
-    geometry.computeVertexNormals();
-
-    const material = new THREE.MeshStandardMaterial({
-        color: 0x6b4a28,
-        roughness: 1.0,
-        metalness: 0.0,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
-    });
-    wetMaterials.push({ material, dryRoughness: 1.0, wetRoughness: 0.55, dryMetalness: 0.0, wetMetalness: 0.18 });
-
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.receiveShadow = true;
-    mesh.renderOrder = 0;
-    return mesh;
-}
-
-// lay down a few winding dirt paths between landmarks
-function createDirtPaths() {
-    // path from camp to the lake shore, curving softly through the grass
-    const campToLake = [
-        new THREE.Vector3(7, 0, 4),
-        new THREE.Vector3(18, 0, -4),
-        new THREE.Vector3(28, 0, -16),
-        new THREE.Vector3(34, 0, -24),
-        new THREE.Vector3(40, 0, -31),
-    ];
-    scene.add(createDirtPath(campToLake, 2.6));
-
-    // a smaller branch wandering off into the eastern forest
-    const branch = [
-        new THREE.Vector3(28, 0, -16),
-        new THREE.Vector3(48, 0, -8),
-        new THREE.Vector3(70, 0, 6),
-        new THREE.Vector3(95, 0, 22),
-        new THREE.Vector3(125, 0, 30),
-    ];
-    scene.add(createDirtPath(branch, 2.0));
-
-    // a rougher trail behind the camp leading into the western tree line
-    const westTrail = [
-        new THREE.Vector3(-4, 0, 8),
-        new THREE.Vector3(-22, 0, 18),
-        new THREE.Vector3(-46, 0, 24),
-        new THREE.Vector3(-72, 0, 38),
-        new THREE.Vector3(-100, 0, 56),
-    ];
-    scene.add(createDirtPath(westTrail, 2.2));
-}
-
-// build a far-off mountain silhouette ring for distant depth
+// creates mountains in the distance for some background 
 function createMountains() {
+    // creates a new group to hold the mountains 
     mountains = new THREE.Group();
     const ridges = 3;
     for (let r = 0; r < ridges; r += 1) {
+        // calculates the distance, peak count, and color for mountain ridge
         const distance = 320 + r * 35;
         const peakCount = 28 + r * 4;
         const baseColor = new THREE.Color().setHSL(0.62 - r * 0.02, 0.18 - r * 0.04, 0.18 - r * 0.05);
+        // creates the material for the mountain 
         const material = new THREE.MeshStandardMaterial({
             color: baseColor,
             roughness: 1.0,
@@ -740,6 +691,7 @@ function createMountains() {
             flatShading: true,
             fog: true,
         });
+        // loops to create peaks for each mountain ridge 
         for (let i = 0; i < peakCount; i += 1) {
             const angle = (i / peakCount) * Math.PI * 2 + (r * 0.07);
             const x = Math.cos(angle) * distance;
@@ -752,31 +704,35 @@ function createMountains() {
             );
             peak.position.set(x, height / 2 - 3, z);
             peak.rotation.y = Math.random() * Math.PI * 2;
+            // adds peaks to the mountains group
             mountains.add(peak);
         }
     }
+    // adds the mountains group the scene 
     scene.add(mountains);
 }
 
-// distant cozy cabin with windows that glow at night
+// creates a cabin with windows that glow at night and a chimney 
 function createCabin() {
+    // creates a group for that cabin 
     const cabin = new THREE.Group();
+    // sets the position for the cabin
     const cabinPos = new THREE.Vector3(-110, 0, -95);
-
+    // creates the materials for the walls of the cabin 
     const wallMaterial = new THREE.MeshStandardMaterial({
         color: 0x6a4626,
         roughness: 0.85,
         metalness: 0.05,
     });
     wetMaterials.push({ material: wallMaterial, dryRoughness: 0.85, wetRoughness: 0.45, dryMetalness: 0.05, wetMetalness: 0.2 });
-
+    // creates the materials for the roof of the cabin
     const roofMaterial = new THREE.MeshStandardMaterial({
         color: 0x2d2018,
         roughness: 0.95,
         metalness: 0.0,
     });
     wetMaterials.push({ material: roofMaterial, dryRoughness: 0.95, wetRoughness: 0.5, dryMetalness: 0.0, wetMetalness: 0.2 });
-
+    // creates the body of the cabin using box geometry and wall material 
     const body = new THREE.Mesh(
         new THREE.BoxGeometry(14, 8, 10),
         wallMaterial,
@@ -784,9 +740,10 @@ function createCabin() {
     body.position.y = 4;
     body.castShadow = true;
     body.receiveShadow = true;
+    // adds the body of the cabin to the cabin group 
     cabin.add(body);
 
-    // a-frame roof using a triangular prism via box rotation
+    // creates the roof of the cabin using cone geometry and roof material
     const roof = new THREE.Mesh(
         new THREE.ConeGeometry(10.5, 5, 4, 1),
         roofMaterial,
@@ -796,26 +753,30 @@ function createCabin() {
     roof.position.y = 11;
     roof.castShadow = true;
     roof.receiveShadow = true;
+    // adds the roof to the cabin group
     cabin.add(roof);
 
-    // chimney
+    // creates the chimney using box geometry 
     const chimney = new THREE.Mesh(
         new THREE.BoxGeometry(1.6, 4.5, 1.6),
         new THREE.MeshStandardMaterial({ color: 0x37302b, roughness: 1.0 }),
     );
     chimney.position.set(4.5, 12.5, -2);
     chimney.castShadow = true;
+    // adds the chimney to the cabin group
     cabin.add(chimney);
 
-    // door
+    // creates the door using box geometry 
     const door = new THREE.Mesh(
         new THREE.BoxGeometry(2.0, 3.6, 0.2),
         new THREE.MeshStandardMaterial({ color: 0x3b2412, roughness: 0.9 }),
     );
+    // sets door to be at the front of the cabin 
     door.position.set(0, 1.8, 5.05);
+    // adds door to the cabin 
     cabin.add(door);
 
-    // door frame
+    // creates the door 
     const doorFrame = new THREE.Mesh(
         new THREE.BoxGeometry(2.4, 4.0, 0.05),
         new THREE.MeshStandardMaterial({ color: 0x271810, roughness: 1.0 }),
@@ -823,8 +784,9 @@ function createCabin() {
     doorFrame.position.set(0, 2.0, 5.06);
     cabin.add(doorFrame);
 
-    // glowing windows -- two on the front, one on the side
+    // reusable window function 
     const makeWindow = (x, z, rotY) => {
+        // creates window using plane geometry 
         const win = new THREE.Mesh(
             new THREE.PlaneGeometry(1.6, 1.6),
             new THREE.MeshStandardMaterial({
@@ -836,50 +798,54 @@ function createCabin() {
         );
         win.position.set(x, 4.2, z);
         win.rotation.y = rotY;
+        // adds window to the cabin group 
         cabin.add(win);
+        // adds window to the windows array 
         cabinWindows.push(win);
 
-        // tiny point light spilling out from the window
+        // creates a tiny point light spilling out from the window
         const winLight = new THREE.PointLight(0xffd07a, 0, 18, 1.6);
         winLight.position.set(x + Math.sin(rotY) * 0.4, 4.2, z + Math.cos(rotY) * 0.4);
+        // adds window light to the cabin group 
         cabin.add(winLight);
         cabinWindows[cabinWindows.length - 1].userData.light = winLight;
     };
+    // creates 3 windows for the cabin 
     makeWindow(-3.5, 5.06, 0);
     makeWindow(3.5, 5.06, 0);
     makeWindow(7.05, 0, Math.PI / 2);
-
     cabin.position.copy(cabinPos);
     cabin.rotation.y = 0.5;
+    // adds the cabin to the scene 
     scene.add(cabin);
 }
 
-// wooden dock that extends from the path into the lake
+// creates a wooden dock that extends into the lake
 function createDock() {
     const dock = new THREE.Group();
-
+    // creates the material for the dock
     const plankMat = new THREE.MeshStandardMaterial({
         color: 0x6a4423,
         roughness: 0.9,
         metalness: 0.05,
     });
+    // adds wet material properties to the dock material
     wetMaterials.push({ material: plankMat, dryRoughness: 0.9, wetRoughness: 0.4, dryMetalness: 0.05, wetMetalness: 0.3 });
-
+    // creates the material for the dock post
     const postMat = new THREE.MeshStandardMaterial({
         color: 0x3b2918,
         roughness: 1.0,
         metalness: 0.0,
     });
+    // adds wet material properties to the dock post material
     wetMaterials.push({ material: postMat, dryRoughness: 1.0, wetRoughness: 0.5, dryMetalness: 0.0, wetMetalness: 0.25 });
 
-    // dock walks from the camp-side shore out into the lake center
-    // start firmly on land (well past the lake shoreline) and reach further into the water
     const startWorld = new THREE.Vector3(40, 0.2, -31);
     const endWorld = new THREE.Vector3(74, 0.2, -55);
     const dir = endWorld.clone().sub(startWorld);
     const length = dir.length();
     const yaw = Math.atan2(dir.x, dir.z);
-
+    // creates the dock deck using box geometry and the plank material 
     const deck = new THREE.Mesh(
         new THREE.BoxGeometry(3.4, 0.3, length),
         plankMat,
@@ -889,9 +855,10 @@ function createDock() {
     deck.position.copy(startWorld).add(dir.clone().multiplyScalar(0.5));
     deck.position.y = 0.6;
     deck.rotation.y = yaw;
+    // adds the deck to the dock 
     dock.add(deck);
 
-    // plank seams every meter to make the deck look like real boards
+    // creates plank seams every meter to make the deck look like real boards
     const plankCount = Math.floor(length / 1.1);
     for (let i = 0; i <= plankCount; i += 1) {
         const t = i / plankCount;
@@ -924,74 +891,38 @@ function createDock() {
             dock.add(post);
         }
     }
-
-    // a small lantern at the far end of the dock
-    const dockLanternHeight = 2.4;
-    const dockLanternPost = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.1, 0.12, dockLanternHeight, 8),
-        postMat,
-    );
-    dockLanternPost.position.copy(endWorld);
-    dockLanternPost.position.y = dockLanternHeight / 2 + 0.3;
-    dockLanternPost.castShadow = true;
-    dock.add(dockLanternPost);
-
-    const dockLanternGlow = new THREE.Mesh(
-        new THREE.SphereGeometry(0.18, 12, 8),
-        new THREE.MeshStandardMaterial({
-            color: 0xffd07a,
-            emissive: 0xffaa44,
-            emissiveIntensity: 2.0,
-            roughness: 0.4,
-        }),
-    );
-    dockLanternGlow.position.copy(endWorld);
-    dockLanternGlow.position.y = dockLanternHeight + 0.3;
-    dock.add(dockLanternGlow);
-
-    const dockLight = new THREE.PointLight(0xffd07a, 0, 26, 1.6);
-    dockLight.position.copy(endWorld);
-    dockLight.position.y = dockLanternHeight + 0.3;
-    dock.add(dockLight);
-    lanterns.push({
-        x: endWorld.x,
-        z: endWorld.z,
-        light: dockLight,
-        glow: dockLanternGlow,
-        pivot: null,
-        swayPhase: Math.random() * Math.PI,
-        phase: Math.random() * Math.PI * 2,
-        speed: 4 + Math.random() * 5,
-    });
-
+    // adds the dock to the scene 
     scene.add(dock);
 }
 
-// canoe near the dock that bobs gently with the water
+// creates a canoe near the dock 
 function createCanoe() {
     canoe = new THREE.Group();
-
+    // creates the hull material of the canoe 
     const hullMat = new THREE.MeshStandardMaterial({
         color: 0x8a4a1f,
         roughness: 0.55,
         metalness: 0.1,
         side: THREE.DoubleSide,
     });
+    // adds wet material properties to the hull material
     wetMaterials.push({ material: hullMat, dryRoughness: 0.55, wetRoughness: 0.2, dryMetalness: 0.1, wetMetalness: 0.5 });
-
+    // create the material for the inner planks of the canoe
     const innerMat = new THREE.MeshStandardMaterial({
         color: 0x5a2f12,
         roughness: 0.85,
         metalness: 0.05,
     });
-
+    wetMaterials.push({ material: innerMat, dryRoughness: 0.85, wetRoughness: 0.4, dryMetalness: 0.05, wetMetalness: 0.2 });
+    // creates the material for the trim and seat of the canoe
     const trimMat = new THREE.MeshStandardMaterial({
         color: 0x2a1a0d,
         roughness: 0.95,
         metalness: 0.0,
     });
+    wetMaterials.push({ material: trimMat, dryRoughness: 0.95, wetRoughness: 0.5, dryMetalness: 0.0, wetMetalness: 0.2 });
 
-    // outer hull is a flattened, elongated half-sphere bowl pointing up
+    // creates the hull of the canoe 
     const hull = new THREE.Mesh(
         new THREE.SphereGeometry(2.2, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.5),
         hullMat,
@@ -1001,9 +932,10 @@ function createCanoe() {
     hull.position.y = 0.55;
     hull.castShadow = true;
     hull.receiveShadow = true;
+    // adds the hull to the canoe 
     canoe.add(hull);
 
-    // interior floor plank that fills in the bottom of the bowl so it doesn't look hollow
+    // creates the interior floor of the canoe 
     const floor = new THREE.Mesh(
         new THREE.BoxGeometry(1.4, 0.08, 4.4),
         innerMat,
@@ -1011,9 +943,10 @@ function createCanoe() {
     floor.position.y = 0.18;
     floor.castShadow = true;
     floor.receiveShadow = true;
+    // adds the floor to the canoe
     canoe.add(floor);
 
-    // top trim ring
+    // creates the top trim ring of the canoe using torus geometry
     const trim = new THREE.Mesh(
         new THREE.TorusGeometry(2.05, 0.07, 6, 24),
         trimMat,
@@ -1021,6 +954,7 @@ function createCanoe() {
     trim.scale.set(1.0, 2.4, 1.0);
     trim.rotation.x = Math.PI / 2;
     trim.position.y = 0.55;
+    // adds the trim to the canoe 
     canoe.add(trim);
 
     // crossbar / seat plank near the middle
@@ -1062,7 +996,7 @@ function createCanoe() {
     scene.add(canoe);
 }
 
-// log benches around the campfire
+// creates log benches around the campfire
 function createCampBenches() {
     const logMat = new THREE.MeshStandardMaterial({
         color: 0x6b4621,
@@ -1070,7 +1004,7 @@ function createCampBenches() {
         metalness: 0.05,
     });
     wetMaterials.push({ material: logMat, dryRoughness: 0.95, wetRoughness: 0.5, dryMetalness: 0.05, wetMetalness: 0.2 });
-
+    // stores the positions we place the logs at around the campfire 
     const benchPositions = [
         { x: -7.5, z: 1.5, rot: 0.1 },
         { x: 6.5, z: -3.5, rot: -1.0 },
@@ -1087,18 +1021,7 @@ function createCampBenches() {
         log.castShadow = true;
         log.receiveShadow = true;
         bench.add(log);
-
-        // two stubby stumps as legs to keep the log from rolling
-        for (const dx of [-1.6, 1.6]) {
-            const leg = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.32, 0.4, 0.7, 8),
-                logMat,
-            );
-            leg.position.set(dx, 0.35, 0);
-            leg.castShadow = true;
-            leg.receiveShadow = true;
-            bench.add(leg);
-        }
+        
 
         bench.position.set(b.x, 0, b.z);
         bench.rotation.y = b.rot;
